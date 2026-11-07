@@ -105,10 +105,10 @@ internal sealed class WebHostWindow:Window
                 if(ShortcutForTest!=null)result=await ShortcutForTest();else{var start=new ProcessStartInfo("powershell.exe"){UseShellExecute=false,CreateNoWindow=true,RedirectStandardOutput=true,RedirectStandardError=true};foreach(string arg in new[]{"-NoLogo","-NoProfile","-NonInteractive","-ExecutionPolicy","Bypass","-File",Path.Combine(AppContext.BaseDirectory,"Create-DesktopShortcut.ps1")})start.ArgumentList.Add(arg);using var process=Process.Start(start)??throw new InvalidOperationException("快捷方式未能创建。");var output=process.StandardOutput.ReadToEndAsync();var errors=process.StandardError.ReadToEndAsync();await process.WaitForExitAsync();await output;await errors;if(process.ExitCode!=0)throw new InvalidOperationException("快捷方式未能创建，请检查桌面写入权限。");result="桌面快捷方式已创建。";}
             }
             else if(c.Type=="copyEmail")result=await CopyEmail();
-            else if(c.Type is "openProfile" or "composeEmail"){
-                string target=c.Type=="openProfile"?"https://github.com/Ciderrr":"mailto:"+NativeShellEmail+"?subject="+Uri.EscapeDataString("艺人助手问题反馈");
+            else if(c.Type is "openProfile" or "openIssues"){
+                string target=c.Type=="openProfile"?"https://github.com/Ciderrr/jx3Art/blob/main/README.md":"https://github.com/Ciderrr/jx3Art/issues";
                 await Task.Run(()=>Open(target));
-                result=c.Type=="openProfile"?"已请求打开GitHub主页。":"已请求打开邮件应用；未打开时可复制邮箱。";
+                result=c.Type=="openProfile"?"已请求打开项目 README。":"已请求打开 GitHub Issues。";
             }else result=Execute(c.Type,c.Payload);
             Publish();Reply(id,true,null,result);
         }catch(Exception ex){if(disposed)return;Service.History.Record("settings_changed",new{success=false});Reply(id,false,ex is ArgumentException or InvalidOperationException?ex.Message:"操作未完成，请重试或查看记录。",null);Publish();}
@@ -143,8 +143,8 @@ internal sealed class WebHostWindow:Window
                 string a=AssistantHotkey.Parse(p.GetProperty("start").GetString()??"").Label,b=AssistantHotkey.Parse(p.GetProperty("stop").GetString()??"").Label;
                 string? error=hotkeys!.Apply(a,b);if(error!=null)throw new InvalidOperationException(error);var old=preferences;try{Save(old with{startHotkey=a,stopHotkey=b});}catch{hotkeys.Apply(old.startHotkey,old.stopHotkey);throw new InvalidOperationException("快捷键未保存，已恢复原设置。");}break;
             case "copyEmail":if(ClipboardForTest!=null)ClipboardForTest(NativeShellEmail);else Clipboard.SetText(NativeShellEmail);return "邮箱已复制。";
-            case "openProfile":Open("https://github.com/Ciderrr");return "已请求打开GitHub主页。";
-            case "composeEmail":Open("mailto:"+NativeShellEmail+"?subject="+Uri.EscapeDataString("艺人助手问题反馈"));return "已请求打开邮件应用；未打开时可复制邮箱。";
+            case "openProfile":Open("https://github.com/Ciderrr/jx3Art/blob/main/README.md");return "已请求打开项目 README。";
+            case "openIssues":Open("https://github.com/Ciderrr/jx3Art/issues");return "已请求打开 GitHub Issues。";
             case "records":return new{message=Service.Latest.Message,detail=Service.Latest.Detail,recording=recording?.Health.Message??"隔离演示，不记录真实运行资源。",history=experience.Previous is ExperienceEntry previous?$"上次估算 +{previous.Estimate.EstimatedGain:N0}":"暂无上次经验记录",saveError=experience.SaveError,preview=ReadCachedPreview(),frameAt=Service.Latest.FrameTime?.ToString("HH:mm:ss",System.Globalization.CultureInfo.InvariantCulture)};
             case "previewReport":pendingReportPreview=SupportReport.Preview(dataRoot,Service.Latest,Service.History.Snapshot());return pendingReportPreview;
             case "saveReport":
@@ -181,7 +181,7 @@ internal sealed class WebHostWindow:Window
     void Open(string value)
     {
         try{if(ShellForTest!=null){if(!ShellForTest(value))throw new InvalidOperationException();}else Process.Start(new ProcessStartInfo(value){UseShellExecute=true});}
-        catch{throw new InvalidOperationException(value.StartsWith("mailto:",StringComparison.Ordinal)?"未能打开邮件应用，请复制下方邮箱后反馈。":"未能打开浏览器，请手动访问GitHub主页。");}
+        catch{throw new InvalidOperationException("未能打开浏览器，请手动访问项目的 GitHub 仓库。");}
     }
     internal object Snapshot()
     {

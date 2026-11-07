@@ -1,11 +1,13 @@
 using System.Diagnostics;
+using System.IO;
 namespace JX3Artist;
 
 internal static class RecognizerProcess
 {
     internal static ProcessStartInfo ForFrame(string script,string path,Jx3.OneClickTest.Box? content=null,double? scaleHint=null)
     {
-        var start=new ProcessStartInfo("py"){UseShellExecute=false,RedirectStandardOutput=true,RedirectStandardError=true,CreateNoWindow=true};
+        string bundledPython = Path.Combine(AppContext.BaseDirectory, "python", "python.exe");
+        var start=new ProcessStartInfo(File.Exists(bundledPython) ? bundledPython : "py"){UseShellExecute=false,RedirectStandardOutput=true,RedirectStandardError=true,CreateNoWindow=true};
         // NumPy initializes OpenBLAS at import. Cap only this short-lived child;
         // no global/user environment changes, no need for a large BLAS thread pool.
         start.Environment["OPENBLAS_NUM_THREADS"]="1";

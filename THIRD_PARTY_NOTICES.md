@@ -6,4 +6,6 @@
 
 WebView2 SDK 与 Vortice.Direct3D11 从 NuGet 恢复。Windows、.NET Desktop Runtime、WebView2 Runtime、Python、OpenCV 和 NumPy 由各自渠道提供，遵循各自条款。 [桌面项目依赖](product/JX3Artist/JX3Artist.csproj) · [捕获项目依赖](int1/int1.csproj)
 
-助手图标采用本项目的原创矢量设计及生成概念。公开界面图来自隔离演示。游戏截图、游戏裁剪模板和私人运行证据未纳入首发。项目根目录的 MIT 许可适用于项目有权授权的自有源码，第三方组件和游戏素材按各自许可处理。
+助手图标采用本项目的原创矢量设计及生成概念。公开界面图来自隔离演示。源码仓库保留隔离演示图。Windows ZIP 按发布者指示随包提供六个用于识别的游戏画面裁剪模板，素材权利归原权利人。项目根目录的 MIT 许可适用于项目有权授权的自有源码，第三方组件和游戏素材按各自许可处理。
+
+Windows ZIP 含 .NET 10.0.13、Python 3.12.10、OpenCV 和 NumPy。运行库声明位于包内 `licenses`、`python/LICENSE.txt`、Python 依赖的 `dist-info` 和 `web/THIRD-PARTY-NOTICES.txt`。

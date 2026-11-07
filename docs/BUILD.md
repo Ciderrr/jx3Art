@@ -1,5 +1,7 @@
 # 构建与验证
 
+玩家可以直接下载 Windows ZIP。 [下载 Release](https://github.com/Ciderrr/jx3Art/releases)
+
 已用 Windows x64、.NET SDK 10.0.402、Node.js 24.16.0 和 WebView2 Runtime 验证演示构建。前端依赖由 `product/frontend/package-lock.json` 固定，.NET 依赖由项目文件声明。
 
 ## 隔离演示与检查
@@ -24,7 +26,7 @@ dotnet output/demo/JX3Artist.dll --ui-offscreen --out output/checks/render
 py -3 -m pip install opencv-python==5.0.0.93 numpy==2.5.4
 ```
 
-完整构建需要下列六个**有相应使用权限且符合检测契约**的文件。对应名称是加载位置，随意裁一张图放在同一路径不足以使识别有效。当前源码首发提供加载契约和代码，模板生成工具与再分发许可仍待整理。
+完整构建需要下列六个**有相应使用权限且符合检测契约**的文件。对应名称是加载位置，随意裁一张图放在同一路径不足以使识别有效。源码仓库提供加载契约和代码。已发布的 Windows ZIP 自带运行所用的六个模板。
 
 | 路径 | 用途 |
 | --- | --- |

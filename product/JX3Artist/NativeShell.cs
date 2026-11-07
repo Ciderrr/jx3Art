@@ -13,7 +13,7 @@ namespace JX3Artist;
 public partial class MainWindow
 {
     internal const string FeedbackEmail="147984829@qq.com";
-    internal const string ProfileUrl="https://github.com/Ciderrr";
+    internal const string ProfileUrl="https://github.com/Ciderrr/jx3Art/blob/main/README.md";
     Window? settingsDialog;
     Action<Key,ModifierKeys>? keyCapture;
     string? animatedState;
@@ -127,18 +127,18 @@ public partial class MainWindow
         reminder.Checked+=(_,_)=>Changed();reminder.Unchecked+=(_,_)=>Changed();preferencesPanel.Children.Add(reminder);preferencesPanel.Children.Add(KeyPanel(dialog));
         tabs.Items.Add(new TabItem{Header="偏好设置",Content=new ScrollViewer{Content=preferencesPanel,VerticalScrollBarVisibility=ScrollBarVisibility.Auto}});
         var about=new StackPanel{Margin=new Thickness(24)};var status=Label("");
-        var profile=new Button{Content="Ciderrr · GitHub主页 ↗",HorizontalAlignment=HorizontalAlignment.Left};profile.Click+=(_,_)=>OpenLink(ProfileUrl,status);about.Children.Add(profile);about.Children.Add(Label("唯满侠\n双开门盾萝@长安城"));about.Children.Add(Label("问题反馈",18));
+        var profile=new Button{Content="项目 README ↗",HorizontalAlignment=HorizontalAlignment.Left};profile.Click+=(_,_)=>OpenLink(ProfileUrl,status);about.Children.Add(profile);about.Children.Add(Label("唯满侠\n双开门盾萝@长安城"));about.Children.Add(Label("问题反馈",18));
         about.Children.Add(Label("描述遇到的问题，可附截图或问题报告。"));
-        var emailRow=new StackPanel{Orientation=Orientation.Horizontal};var email=new Button{Content="邮件反馈 ↗"};email.Click+=(_,_)=>OpenLink("mailto:"+FeedbackEmail+"?subject="+Uri.EscapeDataString("艺人助手问题反馈"),status);emailRow.Children.Add(email);var copy=new Button{Content="复制邮箱"};copy.Click+=async(_,_)=>{for(int attempt=0;attempt<3;attempt++){try{if(ClipboardForTest!=null)ClipboardForTest(FeedbackEmail);else Clipboard.SetText(FeedbackEmail);status.Text="邮箱已复制。";return;}catch(ExternalException){await System.Threading.Tasks.Task.Delay(80);}catch(Exception){break;}}status.Text="复制失败，请选中下方邮箱按Ctrl+C。";};emailRow.Children.Add(copy);about.Children.Add(emailRow);
+        var emailRow=new StackPanel{Orientation=Orientation.Horizontal};var copy=new Button{Content="复制邮箱"};copy.Click+=async(_,_)=>{for(int attempt=0;attempt<3;attempt++){try{if(ClipboardForTest!=null)ClipboardForTest(FeedbackEmail);else Clipboard.SetText(FeedbackEmail);status.Text="邮箱已复制。";return;}catch(ExternalException){await System.Threading.Tasks.Task.Delay(80);}catch(Exception){break;}}status.Text="复制失败，请选中下方邮箱按Ctrl+C。";};emailRow.Children.Add(copy);about.Children.Add(emailRow);
         about.Children.Add(new TextBox{Text=FeedbackEmail,IsReadOnly=true,BorderThickness=new Thickness(0),Background=Brushes.Transparent,Padding=new Thickness(0,10,0,12)});
-        var issues=new Button{Content="GitHub Issues · 尚未配置",IsEnabled=false,HorizontalAlignment=HorizontalAlignment.Left,ToolTip="上传GitHub后，确认仓库地址再补齐"};about.Children.Add(issues);about.Children.Add(status);
+        var issues=new Button{Content="GitHub Issues ↗",HorizontalAlignment=HorizontalAlignment.Left};issues.Click+=(_,_)=>OpenLink("https://github.com/Ciderrr/jx3Art/issues",status);about.Children.Add(issues);about.Children.Add(status);
         tabs.Items.Add(new TabItem{Header="关于与反馈",Content=new ScrollViewer{Content=about,VerticalScrollBarVisibility=ScrollBarVisibility.Auto}});
         dialog.Content=tabs;settingsDialog=dialog;hotkeyDialog=dialog;try{dialog.ShowDialog();}finally{settingsDialog=null;hotkeyDialog=null;keyCapture=null;}
     }
     void OpenLink(string target,TextBlock status)
     {
-        if(target!=ProfileUrl&&!target.StartsWith("mailto:"+FeedbackEmail+"?",StringComparison.Ordinal))throw new ArgumentException("不允许的反馈链接");
-        try{if(ShellOpenForTest!=null){if(!ShellOpenForTest(target))throw new InvalidOperationException();}else Process.Start(new ProcessStartInfo(target){UseShellExecute=true});status.Text=target.StartsWith("mailto:")?"已请求打开邮件应用；未打开时可复制邮箱。":"已请求打开GitHub主页。";}
-        catch{status.Text=target.StartsWith("mailto:")?"未能打开邮件应用，请复制邮箱后反馈。":"未能打开浏览器，请访问 "+ProfileUrl;}
+        if(target!=ProfileUrl&&target!="https://github.com/Ciderrr/jx3Art/issues")throw new ArgumentException("不允许的反馈链接");
+        try{if(ShellOpenForTest!=null){if(!ShellOpenForTest(target))throw new InvalidOperationException();}else Process.Start(new ProcessStartInfo(target){UseShellExecute=true});status.Text="已请求打开 GitHub。";}
+        catch{status.Text="未能打开浏览器，请访问 "+target;}
     }
 }
