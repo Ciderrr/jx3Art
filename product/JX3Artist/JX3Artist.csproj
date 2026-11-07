@@ -1,0 +1,28 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType><TargetFramework>net10.0-windows10.0.22000.0</TargetFramework>
+    <UseWPF>true</UseWPF><PlatformTarget>x64</PlatformTarget><ImplicitUsings>enable</ImplicitUsings><Nullable>enable</Nullable>
+    <AssemblyName>JX3Artist</AssemblyName><ApplicationManifest>app.manifest</ApplicationManifest><StartupObject>JX3Artist.Program</StartupObject>
+    <Version>0.1.77</Version><ApplicationIcon>Assets/AppIcon.ico</ApplicationIcon>
+  </PropertyGroup>
+  <ItemGroup>
+    <None Include="Icons-LICENSE.txt" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="Always" />
+    <None Update="Preview.cmd;Preview.ps1;README.txt;Create-DesktopShortcut.cmd;Create-DesktopShortcut.ps1;Assets/**" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="Always" />
+    <ProjectReference Include="../../int1/int1.csproj" />
+    <Compile Include="../../diagnostics/one_click/ClickPolicy.cs" Link="Input/ClickPolicy.cs" />
+    <Compile Include="../../diagnostics/one_click/Native.cs" Link="Input/Native.cs" />
+    <Compile Include="../../diagnostics/one_click/StartFeedback.cs" Link="Input/StartFeedback.cs" />
+    <Compile Include="../../diagnostics/one_click/FeedbackTests.cs" Link="Tests/FeedbackTests.cs" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Update="web/**/*" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="Always" />
+    <Content Include="../../diagnostics/one_click/locate.py" Link="engine/diagnostics/one_click/locate.py" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="Always" />
+    <Content Include="../../int1/calibration/frame_geometry.py;../../int1/calibration/portable_probe.py;../../int1/calibration/tiled_probe.py;../../int1/calibration/portable_locator.py;../../int1/calibration/appearance_features.py;../../int1/calibration/d1_profile.py;../../int1/calibration/entry_context.py;../../int1/calibration/location_guard.py;../../int1/calibration/panel_locator.py" Link="engine/int1/calibration/%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="Always" />
+    <Content Include="../../int1/calibration/assets/panel_painted_v1.png;../../int1/calibration/assets/panel_painted_mask_v1.png;../../int1/calibration/assets/panel_clock_v1.png;../../int1/calibration/assets/panel_roses_v1.png;../../int1/calibration/assets/start_bar_gold_v1.png" Condition="'$(IncludeGameTemplates)' != 'false'" Link="engine/int1/calibration/assets/%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="Always" />
+    <Content Include="../../vis2/detector/detector_lib.py" Link="engine/vis2/detector/detector_lib.py" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="Always" />
+    <Content Include="../../vis2/template/d1_icon_template.png" Condition="'$(IncludeGameTemplates)' != 'false'" Link="engine/vis2/template/d1_icon_template.png" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="Always" />
+  </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.4314.35" />
+  </ItemGroup>
+</Project>

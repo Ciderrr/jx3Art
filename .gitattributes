@@ -1,0 +1,7 @@
+* text=auto eol=lf
+*.cmd text eol=crlf
+*.bat text eol=crlf
+*.png binary
+*.ico binary
+# Preserve the accepted detector byte-for-byte, including original line endings.
+vis2/detector/detector_lib.py -text

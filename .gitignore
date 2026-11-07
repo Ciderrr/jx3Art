@@ -1,0 +1,13 @@
+**/bin/
+**/obj/
+**/node_modules/
+**/__pycache__/
+**/output/
+/delivery/
+/product/JX3Artist/web/
+/int1/calibration/assets/*.png
+/vis2/template/*.png
+*.user
+*.log
+*.jsonl
+.env*
