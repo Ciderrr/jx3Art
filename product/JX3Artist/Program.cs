@@ -66,10 +66,32 @@ internal static class Program
             if(!first && !demo){MessageBox.Show("软件已在运行，请从任务栏打开。","艺人助手");return 0;}
             Directory.CreateDirectory(folder);var app=new Application();MainWindow? window=null;WebHostWindow? webWindow=null;
             app.DispatcherUnhandledException+=(_,e)=>{e.Handled=true;window?.StopForError(e.Exception.Message);webWindow?.Fail("界面运行异常，辅助已停止。请重新打开助手。");try{File.AppendAllText(Path.Combine(folder,"ui_errors.log"),DateTime.UtcNow+" "+e.Exception+Environment.NewLine);}catch{}};
-            using var recording=demo?null:new ResourceRecording(folder);
-            using var experience=demo?null:new ExperienceSession(folder);
-            if(!uiChecks&&!smoke){webWindow=new WebHostWindow(folder,Path.Combine(AppContext.BaseDirectory,"engine"),demo,recording,experience);return app.Run(webWindow);}
-            window=new MainWindow(folder,Path.Combine(AppContext.BaseDirectory,"engine"),demo,recording,experience);
+            if(!uiChecks&&!smoke)
+            {
+                if(!demo)
+                {
+                    app.ShutdownMode=ShutdownMode.OnExplicitShutdown;
+                    if(!StartupEnvironment.Ensure(folder))return 4;
+                    app.ShutdownMode=ShutdownMode.OnMainWindowClose;
+                }
+                int code;
+                using(var recording=demo?null:new ResourceRecording(folder))
+                using(var experience=demo?null:new ExperienceSession(folder))
+                {
+                    webWindow=new WebHostWindow(folder,Path.Combine(AppContext.BaseDirectory,"engine"),demo,recording,experience);
+                    app.MainWindow=webWindow;
+                    code=app.Run(webWindow);
+                }
+                if(webWindow.PendingUpdate is UpdateLaunch update)
+                {
+                    mutex?.ReleaseMutex();
+                    update.Start(AppContext.BaseDirectory);
+                }
+                return code;
+            }
+            using var legacyRecording=demo?null:new ResourceRecording(folder);
+            using var legacyExperience=demo?null:new ExperienceSession(folder);
+            window=new MainWindow(folder,Path.Combine(AppContext.BaseDirectory,"engine"),demo,legacyRecording,legacyExperience);
             if(uiChecks)
             {
                 window.nativeUiTesting=true; // Set before Show/Loaded: static layout checks must not start entrance clocks.

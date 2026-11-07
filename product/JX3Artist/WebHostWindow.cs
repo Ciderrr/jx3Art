@@ -23,7 +23,8 @@ internal sealed class WebHostWindow:Window
     internal ViewState? Fixture;internal bool? FixtureRunning;
     internal Func<Task<string>>? ShortcutForTest;internal Func<string,bool>? ShellForTest;internal Action<string>? ClipboardForTest;internal Func<string?>? SaveReportPathForTest;
     string iconPreview="";
-    bool disposed,resettingExperience,uploadingIcon;string? pendingReportPreview,pendingExperienceReset;
+    bool disposed,resettingExperience,uploadingIcon,checkingUpdate;
+    internal UpdateLaunch? PendingUpdate { get; private set; }string? pendingReportPreview,pendingExperienceReset;
     internal ExperienceSession Experience=>experience;
     string SettingsPath=>Path.Combine(dataRoot,"settings.json");
     static readonly JsonSerializerOptions Json=new(){PropertyNamingPolicy=JsonNamingPolicy.CamelCase};
@@ -74,7 +75,7 @@ internal sealed class WebHostWindow:Window
     }
     internal void Fail(string message){uiError=message;Stop("web_ui_error");Browser.Visibility=Visibility.Collapsed;emergencyText.Text=message;emergency.Visibility=Visibility.Visible;}
     internal void Stop(string origin="button"){epoch++;pendingPreparation=null;pendingExperienceReset=null;captureTarget=null;editing=false;Service.Stop(origin);Publish();}
-    bool CanStart=>!closing&&!uploadingIcon&&!resettingExperience&&pendingExperienceReset==null&&!Service.IsRunning&&privileged&&Browser.Visibility==Visibility.Visible;
+    bool CanStart=>!closing&&PendingUpdate==null&&!uploadingIcon&&!checkingUpdate&&!resettingExperience&&pendingExperienceReset==null&&!Service.IsRunning&&privileged&&Browser.Visibility==Visibility.Visible;
     void RequestStart(string origin)
     {
         if(!CanStart)throw new InvalidOperationException(Service.IsRunning?"辅助正在运行。":"当前不能开始，请检查权限或界面状态。");
@@ -101,6 +102,23 @@ internal sealed class WebHostWindow:Window
                 resettingExperience=true;try{await Task.Run(experience.ResetLifetime);pendingExperienceReset=null;Service.History.Record("settings_changed",new{success=true});result="累计经验已清零。";}finally{resettingExperience=false;}
             }
             else if(c.Type=="uploadIcon"){if(Service.IsRunning)throw new InvalidOperationException("请先停止辅助，再上传图标。");uploadingIcon=true;try{var picker=new Microsoft.Win32.OpenFileDialog{Filter="图片 (*.png;*.jpg;*.jpeg;*.ico)|*.png;*.jpg;*.jpeg;*.ico",Title="选择助手图标"};if(picker.ShowDialog(this)==true){string importedIcon=IconChoices.Import(dataRoot,picker.FileName);SelectIcon(importedIcon);result="自定义图标已应用。";}else result="已取消选择。";}finally{uploadingIcon=false;}}
+            else if(c.Type=="checkUpdate")
+            {
+                if(demo) result="隔离演示中可查看更新入口。";
+                else
+                {
+                    if(Service.IsRunning) throw new InvalidOperationException("请先停止辅助，再更新助手。");
+                    if(checkingUpdate) throw new InvalidOperationException("更新窗口已经打开。");
+                    checkingUpdate=true;
+                    try
+                    {
+                        PendingUpdate=UpdateDialog.Show(this,dataRoot);
+                        if(PendingUpdate!=null) _ = Dispatcher.BeginInvoke(new Action(Close));
+                        result=null;
+                    }
+                    finally{checkingUpdate=false;}
+                }
+            }
             else if(c.Type=="createShortcut"){
                 if(ShortcutForTest!=null)result=await ShortcutForTest();else{var start=new ProcessStartInfo("powershell.exe"){UseShellExecute=false,CreateNoWindow=true,RedirectStandardOutput=true,RedirectStandardError=true};foreach(string arg in new[]{"-NoLogo","-NoProfile","-NonInteractive","-ExecutionPolicy","Bypass","-File",Path.Combine(AppContext.BaseDirectory,"Create-DesktopShortcut.ps1")})start.ArgumentList.Add(arg);using var process=Process.Start(start)??throw new InvalidOperationException("快捷方式未能创建。");var output=process.StandardOutput.ReadToEndAsync();var errors=process.StandardError.ReadToEndAsync();await process.WaitForExitAsync();await output;await errors;if(process.ExitCode!=0)throw new InvalidOperationException("快捷方式未能创建，请检查桌面写入权限。");result="桌面快捷方式已创建。";}
             }

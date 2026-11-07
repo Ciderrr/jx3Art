@@ -9,3 +9,5 @@ WebView2 SDK 与 Vortice.Direct3D11 从 NuGet 恢复。Windows、.NET Desktop Ru
 助手图标采用本项目的原创矢量设计及生成概念。公开界面图来自隔离演示。源码仓库保留隔离演示图。Windows ZIP 按发布者指示随包提供六个用于识别的游戏画面裁剪模板，素材权利归原权利人。项目根目录的 MIT 许可适用于项目有权授权的自有源码，第三方组件和游戏素材按各自许可处理。
 
 Windows ZIP 含 .NET 10.0.13、Python 3.12.10、OpenCV 和 NumPy。运行库声明位于包内 `licenses`、`python/LICENSE.txt`、Python 依赖的 `dist-info` 和 `web/THIRD-PARTY-NOTICES.txt`。
+
+Windows 安装器使用 Inno Setup 6.7.3，简体中文向导消息来自其上游语言文件并保留署名。发行包附带微软签名的 WebView2 Evergreen 引导程序。 [Inno Setup 许可](https://jrsoftware.org/files/is/license.txt) · [WebView2 部署文档](https://learn.microsoft.com/en-us/microsoft-edge/webview2/concepts/distribution)

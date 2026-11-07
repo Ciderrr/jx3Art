@@ -62,10 +62,11 @@ try{
  $report['appIconSha256']=(Get-FileHash -LiteralPath (Join-Path $package 'Assets/AppIcon.ico') -Algorithm SHA256).Hash
  $report.step='shortcut-test'
  $shortcutRoot=Join-Path $runRoot 'shortcut-test';$shortcutScript=Join-Path $package 'Create-DesktopShortcut.ps1'
- $first=& powershell.exe -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $shortcutScript -DesktopDirectory $shortcutRoot
+ $shortcutBackups=Join-Path $runRoot 'shortcut-backups'
+ $first=& powershell.exe -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $shortcutScript -DesktopDirectory $shortcutRoot -BackupDirectory $shortcutBackups
  if($LASTEXITCODE -ne 0){throw 'Isolated desktop shortcut creation failed'}
  $link=$first|ConvertFrom-Json;$before=(Get-FileHash -LiteralPath $link.shortcut -Algorithm SHA256).Hash
- $second=& powershell.exe -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $shortcutScript -DesktopDirectory $shortcutRoot
+ $second=& powershell.exe -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $shortcutScript -DesktopDirectory $shortcutRoot -BackupDirectory $shortcutBackups
  if($LASTEXITCODE -ne 0){throw 'Isolated desktop shortcut update failed'}
  $updated=$second|ConvertFrom-Json
  if($updated.target -ne (Join-Path $package 'JX3Artist.exe') -or $updated.icon -ne ((Join-Path $package 'Assets/AppIcon.ico')+',0') -or (Get-FileHash -LiteralPath $updated.backup -Algorithm SHA256).Hash -ne $before){throw 'Shortcut target, icon, or original backup mismatch'}

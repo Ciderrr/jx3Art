@@ -30,6 +30,7 @@ internal static class ProductTests
         ExperienceLifetimeTests.Add(Test);
         ExperienceResetTests.Add(Test);
         AppIcon.AddTests(Test);
+        DistributionTests.Add(Test);
         EntryIconPolicyTests.Add(Test);
         ExperienceBoundaryTests.Add(Test);
         UiPreferencesTests.Add(Test);

@@ -1,6 +1,6 @@
 # 构建与验证
 
-玩家可以直接下载 Windows ZIP。 [下载 Release](https://github.com/Ciderrr/jx3Art/releases)
+玩家可以直接下载安装版或 Windows ZIP。 [下载 Release](https://github.com/Ciderrr/jx3Art/releases)
 
 已用 Windows x64、.NET SDK 10.0.402、Node.js 24.16.0 和 WebView2 Runtime 验证演示构建。前端依赖由 `product/frontend/package-lock.json` 固定，.NET 依赖由项目文件声明。
 
@@ -44,3 +44,13 @@ pwsh -NoProfile -File product/Publish-Candidate.ps1 -OutputDirectory delivery/JX
 ```
 
 完整应用启动仍使用原 Windows 管理员授权流程。关闭程序后，可删除程序目录和对应桌面快捷方式。设置、经验和日志保存在 `%LOCALAPPDATA%\JX3ArtistAutomation`，可以按需要保留。
+
+## 安装器和更新包
+
+安装器用 Inno Setup 6.7.3 编译，视觉素材可运行 `node product/installer/render-art.mjs` 重新生成。编译时通过 `/DPayload` 指向完整的 Windows x64 自包含包，通过 `/DOutput` 指定产物目录。发布包包含 `distribution.txt`、本地 Python 环境与 `prerequisites/MicrosoftEdgeWebview2Setup.exe`。引导程序须与启动检查源码中记录的签名验证后 SHA‑256 一致。
+
+发行名为 `JX3Artist-<版本>-Setup.exe` 和 `JX3Artist-<版本>-win-x64.zip`，ZIP 的根目录与其文件名去掉后缀一致。更新器按安装方式选取对应文件，使用 GitHub 正式 Release 的大小和 SHA‑256 校验。安装版保留原目录，便携版生成独立目录。
+
+```powershell
+ISCC.exe /DPayload="C:\build\JX3Artist-1.0-win-x64" /DOutput="C:\build\release" product/installer/JX3Artist.iss
+```
