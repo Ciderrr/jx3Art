@@ -11,5 +11,5 @@ export class NativeBridge implements Bridge{
  else if(m.kind==='capture')this.captures.forEach(f=>f(m as unknown as Capture));});}
  subscribe(fn:(s:Snapshot)=>void){this.listeners.add(fn);if(this.current)fn(this.current);return()=>{this.listeners.delete(fn);};}
  onCapture(fn:(c:Capture)=>void){this.captures.add(fn);return()=>{this.captures.delete(fn);};}
- request(type:string,payload:Record<string,unknown>={},epoch?:number){return new Promise<unknown>((resolve,reject)=>{const id=++this.id;const timer=type==='saveReport'?0:window.setTimeout(()=>{this.pending.delete(id);reject(new Error('界面请求超时；全局停止键仍可使用。'));},10000);this.pending.set(id,{resolve,reject,timer});this.webview.postMessage({schema:1,id,epoch:epoch??this.current?.epoch??0,type,payload});});}
+ request(type:string,payload:Record<string,unknown>={},epoch?:number){return new Promise<unknown>((resolve,reject)=>{const id=++this.id;const timer=type==='saveReport'||type==='checkUpdate'?0:window.setTimeout(()=>{this.pending.delete(id);reject(new Error('界面请求超时；全局停止键仍可使用。'));},10000);this.pending.set(id,{resolve,reject,timer});this.webview.postMessage({schema:1,id,epoch:epoch??this.current?.epoch??0,type,payload});});}
 }

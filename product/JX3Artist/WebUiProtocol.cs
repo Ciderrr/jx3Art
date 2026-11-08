@@ -5,7 +5,7 @@ internal sealed record WebUiCommand(long Id,long Epoch,string Type,JsonElement P
 internal static class WebUiProtocol
 {
     internal const string Origin="https://jx3artist.local";
-    internal static readonly HashSet<string> Commands=new(StringComparer.Ordinal){"checkUpdate","createShortcut","setIcon","uploadIcon","requestExperienceReset","cancelExperienceReset","confirmExperienceReset","minimize","maximize","closeWindow","ready","heartbeat","uiContext","capture","requestStart","confirmStart","cancelPreparation","uiFailure","stop","approve","setAutomatic","setPlan","setReminder","setSkin","setHotkeys","copyEmail","openProfile","openIssues","previewReport","saveReport","records"};
+    internal static readonly HashSet<string> Commands=new(StringComparer.Ordinal){"checkUpdate","createShortcut","setIcon","uploadIcon","requestExperienceReset","cancelExperienceReset","confirmExperienceReset","minimize","maximize","closeWindow","ready","heartbeat","uiContext","capture","requestStart","confirmStart","cancelPreparation","uiFailure","stop","approve","setAutomatic","setPlan","setReminder","setSkin","setHotkeys","copyEmail","openProfile","openAuthor","openIssues","previewReport","saveReport","records"};
     internal static bool Trusted(string source)=>Uri.TryCreate(source,UriKind.Absolute,out var u)&&u.Scheme=="https"&&u.Host=="jx3artist.local"&&u.IsDefaultPort&&u.AbsolutePath=="/index.html"&&string.IsNullOrEmpty(u.Query)&&string.IsNullOrEmpty(u.Fragment)&&string.IsNullOrEmpty(u.UserInfo);
     internal static WebUiCommand Parse(string source,string json)
     {

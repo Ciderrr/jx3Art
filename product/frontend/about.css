@@ -1,0 +1,58 @@
+.jx3-about-panel {
+  display: grid;
+  font: 14px/1.5 var(--ui-font);
+}
+.jx3-about-panel section { padding: 14px 0; }
+.jx3-dialog.jx3-settings { display: flex; flex-direction: column; overflow: hidden; }
+.jx3-settings > .jx3-dialog-head { flex: none; }
+.jx3-settings-body { min-height: 0; flex: 1; overflow-x: hidden; overflow-y: auto; scrollbar-width: thin; }
+.jx3-settings-body .jx3-save-note:empty { display: none; }
+.jx3-settings-tooltip { position: relative; display: inline-flex; }
+.jx3-settings-tooltip > button:disabled { pointer-events: none; }
+.jx3-settings-tooltip > [role=tooltip] {
+  position: absolute;
+  z-index: 1;
+  inset-inline-start: 0;
+  bottom: calc(100% + 6px);
+  white-space: nowrap;
+  padding: 5px 8px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--fg);
+  font-size: 12px;
+  visibility: hidden;
+}
+.jx3-settings-tooltip:is(:hover,:focus-visible) > [role=tooltip] { visibility: visible; }
+.jx3-about-panel section + section { border-top: 1px solid var(--line); }
+.jx3-about-panel h3 { margin: 0; font: 600 15px/1.5 var(--ui-font); }
+.jx3-about-project { display: grid; justify-items: start; gap: 7px; }
+.jx3-about-project a { display: inline-flex; align-items: center; gap: 6px; color: var(--accent); text-decoration: none; }
+.jx3-about-project a:hover { text-decoration: underline; text-underline-offset: 3px; }
+.jx3-about-project .jx3-about-identity { margin: 2px 0 0; }
+.jx3-about-project .jx3-about-license { display: grid; gap: 2px; margin: 0 0 7px; }
+.jx3-about-license strong { font-weight: 600; }
+.jx3-about-license span { color: var(--muted); font-size: 13px; }
+.jx3-about-identity span { margin-inline-start: 6px; }
+.jx3-about-row { display: flex; align-items: center; justify-content: space-between; gap: 14px; }
+.jx3-about-row + .jx3-about-row, .jx3-about-panel h3 + .jx3-about-row { margin-top: 12px; }
+.jx3-about-row strong { font-weight: 500; }
+.jx3-about-panel .jx3-about-row p, .jx3-about-email { margin: 1px 0 0; color: var(--muted); font: 13px/1.5 var(--ui-font); }
+.jx3-about-email { display: block; max-width: 100%; padding: 0; border: 0; background: transparent; }
+.jx3-about-notice {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+  padding: 6px 8px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--fg);
+  font-size: 13px;
+}
+.jx3-about-notice > svg { flex: none; color: var(--accent); }
+.jx3-about-notice[data-error=true] > svg { color: color-mix(in srgb,var(--fg),#d34d40 62%); }
+.jx3-about-notice button { display: grid; place-items: center; margin-inline-start: auto; padding: 4px; border: 0; border-radius: 4px; background: transparent; color: inherit; cursor: pointer; }
+.jx3-about-notice button:hover { background: var(--line); }

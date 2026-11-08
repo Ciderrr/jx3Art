@@ -104,10 +104,10 @@ internal sealed class WebHostWindow:Window
             else if(c.Type=="uploadIcon"){if(Service.IsRunning)throw new InvalidOperationException("请先停止辅助，再上传图标。");uploadingIcon=true;try{var picker=new Microsoft.Win32.OpenFileDialog{Filter="图片 (*.png;*.jpg;*.jpeg;*.ico)|*.png;*.jpg;*.jpeg;*.ico",Title="选择助手图标"};if(picker.ShowDialog(this)==true){string importedIcon=IconChoices.Import(dataRoot,picker.FileName);SelectIcon(importedIcon);result="自定义图标已应用。";}else result="已取消选择。";}finally{uploadingIcon=false;}}
             else if(c.Type=="checkUpdate")
             {
+                if(Service.IsRunning || Service.IsStopping) throw new InvalidOperationException("请先停止辅助，再更新助手。");
                 if(demo) result="隔离演示中可查看更新入口。";
                 else
                 {
-                    if(Service.IsRunning) throw new InvalidOperationException("请先停止辅助，再更新助手。");
                     if(checkingUpdate) throw new InvalidOperationException("更新窗口已经打开。");
                     checkingUpdate=true;
                     try
@@ -123,10 +123,14 @@ internal sealed class WebHostWindow:Window
                 if(ShortcutForTest!=null)result=await ShortcutForTest();else{var start=new ProcessStartInfo("powershell.exe"){UseShellExecute=false,CreateNoWindow=true,RedirectStandardOutput=true,RedirectStandardError=true};foreach(string arg in new[]{"-NoLogo","-NoProfile","-NonInteractive","-ExecutionPolicy","Bypass","-File",Path.Combine(AppContext.BaseDirectory,"Create-DesktopShortcut.ps1")})start.ArgumentList.Add(arg);using var process=Process.Start(start)??throw new InvalidOperationException("快捷方式未能创建。");var output=process.StandardOutput.ReadToEndAsync();var errors=process.StandardError.ReadToEndAsync();await process.WaitForExitAsync();await output;await errors;if(process.ExitCode!=0)throw new InvalidOperationException("快捷方式未能创建，请检查桌面写入权限。");result="桌面快捷方式已创建。";}
             }
             else if(c.Type=="copyEmail")result=await CopyEmail();
-            else if(c.Type is "openProfile" or "openIssues"){
-                string target=c.Type=="openProfile"?"https://github.com/Ciderrr/jx3Art/blob/main/README.md":"https://github.com/Ciderrr/jx3Art/issues";
+            else if(c.Type is "openProfile" or "openAuthor" or "openIssues"){
+                string target=c.Type switch {
+                    "openProfile"=>"https://github.com/Ciderrr/jx3Art",
+                    "openAuthor"=>"https://github.com/Ciderrr",
+                    _=>"https://github.com/Ciderrr/jx3Art/issues"
+                };
                 await Task.Run(()=>Open(target));
-                result=c.Type=="openProfile"?"已请求打开项目 README。":"已请求打开 GitHub Issues。";
+                result=null;
             }else result=Execute(c.Type,c.Payload);
             Publish();Reply(id,true,null,result);
         }catch(Exception ex){if(disposed)return;Service.History.Record("settings_changed",new{success=false});Reply(id,false,ex is ArgumentException or InvalidOperationException?ex.Message:"操作未完成，请重试或查看记录。",null);Publish();}
@@ -160,9 +164,6 @@ internal sealed class WebHostWindow:Window
             case "setHotkeys":
                 string a=AssistantHotkey.Parse(p.GetProperty("start").GetString()??"").Label,b=AssistantHotkey.Parse(p.GetProperty("stop").GetString()??"").Label;
                 string? error=hotkeys!.Apply(a,b);if(error!=null)throw new InvalidOperationException(error);var old=preferences;try{Save(old with{startHotkey=a,stopHotkey=b});}catch{hotkeys.Apply(old.startHotkey,old.stopHotkey);throw new InvalidOperationException("快捷键未保存，已恢复原设置。");}break;
-            case "copyEmail":if(ClipboardForTest!=null)ClipboardForTest(NativeShellEmail);else Clipboard.SetText(NativeShellEmail);return "邮箱已复制。";
-            case "openProfile":Open("https://github.com/Ciderrr/jx3Art/blob/main/README.md");return "已请求打开项目 README。";
-            case "openIssues":Open("https://github.com/Ciderrr/jx3Art/issues");return "已请求打开 GitHub Issues。";
             case "records":return new{message=Service.Latest.Message,detail=Service.Latest.Detail,recording=recording?.Health.Message??"隔离演示，不记录真实运行资源。",history=experience.Previous is ExperienceEntry previous?$"上次估算 +{previous.Estimate.EstimatedGain:N0}":"暂无上次经验记录",saveError=experience.SaveError,preview=ReadCachedPreview(),frameAt=Service.Latest.FrameTime?.ToString("HH:mm:ss",System.Globalization.CultureInfo.InvariantCulture)};
             case "previewReport":pendingReportPreview=SupportReport.Preview(dataRoot,Service.Latest,Service.History.Snapshot());return pendingReportPreview;
             case "saveReport":
@@ -194,7 +195,7 @@ internal sealed class WebHostWindow:Window
             catch(System.Runtime.InteropServices.ExternalException){await Task.Delay(80);}
             catch{break;}
         }
-        throw new InvalidOperationException("复制失败，请选中下方邮箱按Ctrl+C复制。");
+        throw new InvalidOperationException("复制失败，可选中邮箱按 Ctrl+C 复制。");
     }
     void Open(string value)
     {

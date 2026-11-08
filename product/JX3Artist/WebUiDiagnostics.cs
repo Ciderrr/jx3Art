@@ -81,18 +81,88 @@ internal static class WebUiDiagnostics
             await Wait(()=>!host.Editing);host.Execute("setReminder",JsonSerializer.SerializeToElement(new{enabled=false}));host.Publish();await Until(host,"window.__artistSnapshot.skipReminder");await Eval(host,"document.querySelector('.jx3-action').click()");await Wait(()=>host.Service.IsRunning);host.DispatchHotkey(AssistantHotkeys.StopId);await Wait(()=>!host.Service.IsRunning);host.Publish();await Until(host,$"window.__artistSnapshot.epoch==={host.Epoch}&&!window.__artistSnapshot.running");
         });
         await Test("skin change and native project links and clipboard paths preserve state",async()=>{
-            long gain=hostSnapshotGain(host);var phase=host.Service.Latest.Phase;host.Execute("setSkin",JsonSerializer.SerializeToElement(new{skin="墨场"}));host.Publish();await Until(host,"window.__artistSnapshot.skin==='墨场'");Assert(hostSnapshotGain(host)==gain&&host.Service.Latest.Phase==phase,"skin altered business");string? copy=null,link=null;host.ClipboardForTest=x=>copy=x;host.ShellForTest=x=>{link=x;return true;};host.Execute("copyEmail",JsonSerializer.SerializeToElement(new{}));host.Execute("openProfile",JsonSerializer.SerializeToElement(new{}));Assert(link=="https://github.com/Ciderrr/jx3Art/blob/main/README.md","wrong README target");host.Execute("openIssues",JsonSerializer.SerializeToElement(new{}));Assert(copy=="147984829@qq.com"&&link=="https://github.com/Ciderrr/jx3Art/issues","wrong feedback target");host.ClipboardForTest=null;host.ShellForTest=null;
+            long gain=hostSnapshotGain(host);var phase=host.Service.Latest.Phase;
+            host.Execute("setSkin",JsonSerializer.SerializeToElement(new{skin="墨场"}));host.Publish();
+            await Until(host,"window.__artistSnapshot.skin==='墨场'");
+            Assert(hostSnapshotGain(host)==gain&&host.Service.Latest.Phase==phase,"skin altered business");
+            string? copy=null,link=null;
+            host.ClipboardForTest=x=>copy=x;host.ShellForTest=x=>{link=x;return true;};
+            try
+            {
+                host.Execute("requestStart",JsonSerializer.SerializeToElement(new{}));host.Publish();
+                await Wait(()=>host.Service.IsRunning);
+                await Eval(host,"(()=>{const b=document.querySelector('[data-target=menu]');b.focus();b.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',bubbles:true}));})()");
+                await Until(host,"!!document.querySelector('[data-target=settings]')");
+                await Eval(host,"document.querySelector('[data-target=settings]').click()");
+                await Until(host,"!!document.querySelector('[role=tablist]')");
+                await Eval(host,"document.querySelectorAll('[role=tab]')[1].dispatchEvent(new MouseEvent('mousedown',{button:0,bubbles:true}))");
+                await Until(host,"!!document.querySelector('[data-about-action=checkUpdate]')");
+                Assert((await Eval(host,"document.querySelector('.jx3-about-project').firstElementChild.textContent.includes('MIT 开源') && [...document.querySelectorAll('[data-about-action]')].every(b=>b.matches('.jx3-settings-button') && b.querySelector('.ss-button').dataset.variant==='secondary')")).GetBoolean(),"license or shared button style missing");
+                await Task.Delay(300);
+                await Capture(host,Path.Combine(output,"about-settings-dark.png"));
+                await Eval(host,"document.querySelector('[data-about-action=checkUpdate]').click()");
+                await Until(host,"document.querySelector('.jx3-about-notice[data-area=updates]')?.textContent.includes('请先停止辅助')===true");
+                Assert(!(await Eval(host,"document.querySelector('footer').textContent.includes('请先停止辅助')")).GetBoolean(),"update error escaped settings");
+                host.Execute("setSkin",JsonSerializer.SerializeToElement(new{skin="幕间"}));host.Publish();
+                await Until(host,"window.__artistSnapshot.skin==='幕间'");
+                await Capture(host,Path.Combine(output,"about-update-blocked.png"));
+                await Eval(host,"document.querySelector('.jx3-about-notice button').click()");
+                await Until(host,"!document.querySelector('.jx3-about-notice')");
+                foreach(string target in new[]{"https://github.com/Ciderrr/jx3Art","https://github.com/Ciderrr","https://github.com/Ciderrr/jx3Art/issues"})
+                {
+                    string selector=target.EndsWith("/issues")?"[data-about-action=openIssues]":$".jx3-about-project a[href='{target}']";
+                    await Eval(host,$"document.querySelector({JsonSerializer.Serialize(selector)}).click()");
+                    await Wait(()=>link==target);
+                    await Until(host,"!document.querySelector('.jx3-about-notice') && !document.querySelector('[data-about-action=openIssues]').disabled");
+                }
+                var point=await Eval(host,"(()=>{const r=document.querySelector('[data-about-action=copyEmail]').getBoundingClientRect();return {x:r.x+r.width/2,y:r.y+r.height/2}})()");
+                double x=point.GetProperty("x").GetDouble(),y=point.GetProperty("y").GetDouble();
+                await host.Browser.CoreWebView2.CallDevToolsProtocolMethodAsync("Input.dispatchMouseEvent",JsonSerializer.Serialize(new{type="mousePressed",x,y,button="left",clickCount=1}));
+                try
+                {
+                    await Until(host,"new DOMMatrix(getComputedStyle(document.querySelector('[data-about-action=copyEmail]')).transform).a<.995");
+                }
+                finally
+                {
+                    await host.Browser.CoreWebView2.CallDevToolsProtocolMethodAsync("Input.dispatchMouseEvent",JsonSerializer.Serialize(new{type="mouseReleased",x,y,button="left",clickCount=1}));
+                }
+                await Until(host,"document.querySelector('.jx3-about-notice[data-area=feedback]')?.textContent.includes('邮箱已复制')===true");
+                Assert(copy=="147984829@qq.com","wrong feedback address");
+                await Capture(host,Path.Combine(output,"about-copy-success.png"));
+                await Until(host,"!document.querySelector('.jx3-about-notice')");
+                await Eval(host,"document.querySelector('[data-target=close]').click()");
+                await Until(host,"!document.querySelector('.jx3-settings') && !document.querySelector('footer').textContent.includes('请先停止辅助')");
+            }
+            finally
+            {
+                host.ClipboardForTest=null;host.ShellForTest=null;host.Stop("diagnostic_about");
+                await Wait(()=>!host.Service.IsRunning);
+            }
         });
         await Test("real automatic mode and visible explanation agree before start",async()=>{
             host.Execute("setAutomatic",JsonSerializer.SerializeToElement(new{enabled=true}));host.Publish();await Until(host,"window.__artistSnapshot.automatic===true");Assert(host.Service.Mode.Enabled,"UI choice not bound to real mode");Assert((await Eval(host,"document.querySelector('aside .jx3-hint').textContent.includes('自动切回游戏')")).GetBoolean(),"manual hint contradicts switch");
         });
         await Test("actual settings recorder captures DOM combination and persists native keys",async()=>{
             await Eval(host,"(()=>{const b=document.querySelector('[data-target=menu]');b.focus();b.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',bubbles:true}));})()");await Until(host,"!!document.querySelector('[data-target=settings]')");await Eval(host,"document.querySelector('[data-target=settings]').click()");await Until(host,"!!document.querySelector('[aria-label=录入开始快捷键]')");await Task.Delay(350);Assert((await Eval(host,"document.activeElement===document.querySelector('.jx3-settings-title') && document.activeElement!==document.querySelector('[data-target=close]')")).GetBoolean(),"settings auto-focused close button");Assert((await Eval(host,"getComputedStyle(document.querySelector('.jx3-window-actions button')).pointerEvents==='auto' && !document.querySelector('.jx3-paper').contains(document.querySelector('.jx3-window-actions'))")).GetBoolean(),"caption controls trapped beneath modal or scaled content");await Capture(host,Path.Combine(output,"settings-first-open.png"));await host.Browser.CoreWebView2.CallDevToolsProtocolMethodAsync("Input.dispatchKeyEvent","{\"type\":\"keyDown\",\"key\":\"Tab\",\"code\":\"Tab\",\"windowsVirtualKeyCode\":9}");await Until(host,"document.activeElement===document.querySelector('[data-target=close]')");Assert((await Eval(host,"document.activeElement.matches(':focus-visible')")).GetBoolean(),"keyboard focus ring removed");
+            Assert((await Eval(host,"document.querySelector('.jx3-save-keys').matches('.jx3-settings-button') && document.querySelector('.jx3-save-keys .ss-button').dataset.variant==='secondary'")).GetBoolean(),"shortcut save does not use the settings button style");
+            var keyPoint=await Eval(host,"(()=>{const b=document.querySelector('[aria-label=录入开始快捷键]'),r=b.getBoundingClientRect();window.__settingsKeyFill=getComputedStyle(b.querySelector('.ss-button')).backgroundColor;return {x:r.x+r.width/2,y:r.y+r.height/2}})()");
+            await host.Browser.CoreWebView2.CallDevToolsProtocolMethodAsync("Input.dispatchMouseEvent",JsonSerializer.Serialize(new{type="mouseMoved",x=keyPoint.GetProperty("x").GetDouble(),y=keyPoint.GetProperty("y").GetDouble()}));
+            await Until(host,"(()=>{const b=document.querySelector('[aria-label=录入开始快捷键]');return new DOMMatrix(getComputedStyle(b).transform).f<-.25 && getComputedStyle(b.querySelector('.ss-button')).backgroundColor!==window.__settingsKeyFill})()");
+            await Capture(host,Path.Combine(output,"settings-key-hover.png"));
             await Eval(host,"document.querySelector('[aria-label=录入开始快捷键]').click()");await Wait(()=>host.CaptureTarget=="start");host.DispatchHotkey(AssistantHotkeys.StartId);await Until(host,"document.querySelector('[aria-label=录入开始快捷键]').textContent==='F7'");Assert(!host.Service.IsRunning,"key recording started assistance");
             await Eval(host,"document.querySelector('[aria-label=录入开始快捷键]').click()");await Wait(()=>host.CaptureTarget=="start");await Eval(host,"window.dispatchEvent(new KeyboardEvent('keydown',{key:'s',ctrlKey:true,altKey:true,bubbles:true}))");
             await Until(host,"document.querySelector('[aria-label=录入开始快捷键]').textContent==='Ctrl+Alt+S'");
             await Eval(host,"document.querySelector('[aria-label=录入停止快捷键]').click()");await Wait(()=>host.CaptureTarget=="stop");await Eval(host,"window.dispatchEvent(new KeyboardEvent('keydown',{key:'q',ctrlKey:true,altKey:true,bubbles:true}))");
             await Until(host,"document.querySelector('[aria-label=录入停止快捷键]').textContent==='Ctrl+Alt+Q'");await Eval(host,"[...document.querySelectorAll('button')].find(x=>x.textContent==='保存快捷键').click()");await Until(host,"window.__artistSnapshot.startHotkey==='Ctrl+Alt+S'");
+            await Until(host,"document.querySelector('.jx3-save-keys + [data-area=keys][data-error=false]')?.textContent.includes('快捷键已保存')===true");
+            Assert((await Eval(host,"!document.querySelector('.jx3-save-note').textContent.includes('快捷键已保存')")).GetBoolean(),"save feedback leaked to settings footer");
+            using(var held=new FileStream(Path.Combine(output,"data","settings.json"),FileMode.Open,FileAccess.Read,FileShare.None))
+            {
+                await Eval(host,"document.querySelector('.jx3-save-keys').click()");
+                await Until(host,"document.querySelector('.jx3-save-keys + [data-area=keys][data-error=true]')?.textContent.includes('快捷键未保存')===true");
+            }
+            await Eval(host,"document.querySelector('[data-area=keys] button').click()");
+            await Until(host,"!document.querySelector('[data-area=keys]')");
             Assert(UiPreferences.Load(Path.Combine(output,"data","settings.json")).stopHotkey=="Ctrl+Alt+Q","native keys not persisted");await Capture(host,Path.Combine(output,"settings.png"));
             await Eval(host,"document.querySelector('[data-target=close]').click()");await Until(host,"!document.querySelector('.jx3-settings')");await Wait(()=>!host.Editing);
         });
@@ -130,7 +200,7 @@ internal static class WebUiDiagnostics
         });
         await Test("settings lifetime reset requires confirmation preserves current gain and refuses active automation",async()=>{
             long at=(long)FrameTiming.NowMs()+600000;foreach(long t in new[]{at,at+60000})host.Experience.Observe(new(t,t+100,true,true,"NO_VERIFIED_CANDIDATE",0,"VISIBLE",PanelLocated:true,PanelLocation:"UNIQUE_PANEL"),Phase.Performing,0,0,120000);host.Publish();long current=host.Experience.Read().EstimatedGain,total=host.Experience.LifetimeGain!.Value;Assert(current>=6,"reset fixture earned no estimate");
-            await Eval(host,"(()=>{const b=document.querySelector('[data-target=menu]');b.focus();b.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',bubbles:true}));})()");await Until(host,"!!document.querySelector('[data-target=settings]')");await Eval(host,"document.querySelector('[data-target=settings]').click()");await Until(host,"!!document.querySelector('[data-target=request-reset]')");await Eval(host,"document.querySelector('[data-target=request-reset]').click()");await Until(host,"!!document.querySelector('.jx3-reset-dialog')");Assert((await Eval(host,"!document.querySelector('.jx3-reset-row').textContent.includes('历史') && parseFloat(getComputedStyle(document.querySelector('.jx3-reset-dialog h2')).fontSize)===20 && !getComputedStyle(document.querySelector('.jx3-reset-dialog h2')).fontFamily.includes('SimSun')")).GetBoolean(),"reset copy or typography not refined");await Capture(host,Path.Combine(output,"experience-reset-confirm.png"));await Eval(host,"document.querySelector('.jx3-reset-dialog .jx3-secondary').click()");await Until(host,"!document.querySelector('.jx3-reset-dialog')");Assert(host.Experience.LifetimeGain==total,"cancel reset changed cumulative gain");
+            await Eval(host,"(()=>{const b=document.querySelector('[data-target=menu]');b.focus();b.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',bubbles:true}));})()");await Until(host,"!!document.querySelector('[data-target=settings]')");await Eval(host,"document.querySelector('[data-target=settings]').click()");await Until(host,"!!document.querySelector('[data-target=request-reset]')");await Eval(host,"document.querySelector('[data-target=request-reset]').click()");await Until(host,"!!document.querySelector('.jx3-reset-dialog')");Assert((await Eval(host,"!document.querySelector('.jx3-reset-row').textContent.includes('历史') && parseFloat(getComputedStyle(document.querySelector('.jx3-reset-dialog h2')).fontSize)===20 && !getComputedStyle(document.querySelector('.jx3-reset-dialog h2')).fontFamily.includes('SimSun')")).GetBoolean(),"reset copy or typography not refined");await Capture(host,Path.Combine(output,"experience-reset-confirm.png"));await Eval(host,"document.querySelector('.jx3-reset-dialog .jx3-dialog-actions button').click()");await Until(host,"!document.querySelector('.jx3-reset-dialog')");Assert(host.Experience.LifetimeGain==total,"cancel reset changed cumulative gain");
             await Eval(host,"document.querySelector('[data-target=request-reset]').click()");await Until(host,"!!document.querySelector('[data-target=confirm-reset]')");host.DispatchHotkey(AssistantHotkeys.StopId);await Until(host,"!document.querySelector('.jx3-reset-dialog') && !document.querySelector('.jx3-settings')");Assert(host.Experience.LifetimeGain==total,"stop committed unconfirmed reset");await Wait(()=>!host.Editing);
             await Eval(host,"(()=>{const b=document.querySelector('[data-target=menu]');b.focus();b.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',bubbles:true}));})()");await Until(host,"!!document.querySelector('[data-target=settings]')");await Eval(host,"document.querySelector('[data-target=settings]').click()");await Until(host,"!!document.querySelector('[data-target=request-reset]')");await Eval(host,"document.querySelector('[data-target=request-reset]').click()");await Until(host,"!!document.querySelector('[data-target=confirm-reset]')");await Eval(host,"document.querySelector('[data-target=confirm-reset]').click()");await Until(host,"window.__artistSnapshot.total==='0' && !document.querySelector('.jx3-reset-dialog')");Assert(host.Experience.Read().EstimatedGain==current&&!host.Service.IsRunning,"clear changed raw gain or started automation");await Capture(host,Path.Combine(output,"experience-reset-result.png"));
             foreach(long t in new[]{at+120000,at+180000})host.Experience.Observe(new(t,t+100,true,true,"NO_VERIFIED_CANDIDATE",0,"VISIBLE",PanelLocated:true,PanelLocation:"UNIQUE_PANEL"),Phase.Performing,0,0,120000);Assert(host.Experience.Flush(),"reset fixture not flushed");host.Publish();await Until(host,"window.__artistSnapshot.total==='6'");await Eval(host,"document.querySelector('[data-target=request-reset]').click()");await Until(host,"!!document.querySelector('[data-target=confirm-reset]')");
@@ -163,7 +233,28 @@ internal static class WebUiDiagnostics
             host.Stop("icon_check");await Wait(()=>!host.Service.IsRunning);long gain=hostSnapshotGain(host);int starts=host.Service.Latest.Starts;
             foreach(string id in IconChoices.Ids){host.Execute("setIcon",JsonSerializer.SerializeToElement(new{icon=id}));host.Publish();await Until(host,$"window.__artistSnapshot.appIcon==={JsonSerializer.Serialize(id)}");Assert(AppIcon.WindowMatchesSource(new System.Windows.Interop.WindowInteropHelper(host).Handle,out _),"selected window icon mismatch");Assert(hostSnapshotGain(host)==gain&&host.Service.Latest.Starts==starts,"icon changed statistics");}
             string uploaded=IconChoices.Import(Path.Combine(output,"data"),Path.Combine(AppContext.BaseDirectory,"Assets","AppIcon-64.png"));host.Execute("setIcon",JsonSerializer.SerializeToElement(new{icon=uploaded}));host.Publish();await Until(host,"window.__artistSnapshot.appIcon.startsWith('custom-')");Assert(UiPreferences.Load(Path.Combine(output,"data","settings.json")).appIcon==uploaded,"custom choice not saved");host.Execute("setIcon",JsonSerializer.SerializeToElement(new{icon="01-yunxiu"}));host.Publish();
-            await Eval(host,"(()=>{const b=document.querySelector('[data-target=menu]');b.focus();b.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',bubbles:true}));})()");await Until(host,"!!document.querySelector('[data-target=settings]')");await Eval(host,"document.querySelector('[data-target=settings]').click()");await Until(host,"!!document.querySelector('.jx3-icon-options')");Assert((await Eval(host,"document.querySelectorAll('.jx3-icon-options [aria-pressed]').length===6 && !document.querySelector('.jx3-icon-options').textContent.includes('梨园')")).GetBoolean(),"icon options incorrect");host.ShortcutForTest=()=>Task.FromResult("桌面快捷方式已创建。");await Eval(host,"document.querySelector('[data-target=create-shortcut]').click()");await Until(host,"document.querySelector('.jx3-save-note').textContent.includes('桌面快捷方式已创建')");host.ShortcutForTest=null;await Capture(host,Path.Combine(output,"icon-settings.png"));await Eval(host,"document.querySelector('[data-target=close]').click()");await Until(host,"!document.querySelector('.jx3-settings')");
+            await Eval(host,"(()=>{const b=document.querySelector('[data-target=menu]');b.focus();b.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',bubbles:true}));})()");await Until(host,"!!document.querySelector('[data-target=settings]')");await Eval(host,"document.querySelector('[data-target=settings]').click()");await Until(host,"!!document.querySelector('.jx3-icon-options')");Assert((await Eval(host,"document.querySelectorAll('.jx3-icon-options [aria-pressed]').length===6 && !document.querySelector('.jx3-icon-options').textContent.includes('梨园')")).GetBoolean(),"icon options incorrect");host.ShortcutForTest=()=>Task.FromResult("桌面快捷方式已创建。");await Eval(host,"document.querySelector('[data-target=create-shortcut]').click()");await Until(host,"document.querySelector('[data-target=create-shortcut] + [data-area=shortcut][data-error=false]')?.textContent.includes('桌面快捷方式已创建')===true");
+            Assert((await Eval(host,"!document.querySelector('.jx3-save-note').textContent.includes('桌面快捷方式已创建') && !document.querySelector('footer').textContent.includes('桌面快捷方式已创建')")).GetBoolean(),"shortcut success leaked outside its section");
+            await Capture(host,Path.Combine(output,"settings-inline-shortcut.png"));
+            host.ShortcutForTest=()=>Task.FromException<string>(new InvalidOperationException("快捷方式未能创建，请检查桌面写入权限。"));
+            try{
+                await Eval(host,"document.querySelector('[data-target=create-shortcut]').click()");
+                await Until(host,"document.querySelector('[data-area=shortcut][data-error=true]')?.textContent.includes('快捷方式未能创建')===true");
+                Assert(!(await Eval(host,"document.querySelector('footer').textContent.includes('快捷方式未能创建')")).GetBoolean(),"shortcut failure leaked to homepage");
+                await Eval(host,"document.querySelector('[data-area=shortcut] button').click()");
+                await Until(host,"!document.querySelector('[data-area=shortcut]')");
+            }finally{host.ShortcutForTest=null;}
+            await Eval(host,"(()=>{const c=document.querySelector('[data-target=close]'),s=document.querySelector('.jx3-settings-body');window.__closeTop=c.getBoundingClientRect().top;s.scrollTop=s.scrollHeight;})()");
+            Assert((await Eval(host,"(()=>{const c=document.querySelector('[data-target=close]'),s=document.querySelector('.jx3-settings-body');return s.scrollTop>0 && c.getBoundingClientRect().top===window.__closeTop && document.elementFromPoint(c.getBoundingClientRect().x+8,c.getBoundingClientRect().y+8)?.closest('[data-target=close]')===c})()")).GetBoolean(),"close button moved or was covered on scroll");
+            host.Fixture=new(Phase.Performing,"隔离设置提示");host.FixtureRunning=true;host.Publish();
+            await Until(host,"document.querySelector('.jx3-settings-tooltip button').disabled && document.querySelector('[data-target=request-reset]').disabled");
+            Assert((await Eval(host,"!document.querySelector('.jx3-settings').textContent.includes('停止辅助后可清零') && getComputedStyle(document.querySelector('#upload-icon-tooltip')).visibility==='hidden'")).GetBoolean(),"inactive guard or tooltip visibility changed");
+            var uploadPoint=await Eval(host,"(()=>{const r=document.querySelector('.jx3-settings-tooltip').getBoundingClientRect();return {x:r.x+r.width/2,y:r.y+r.height/2}})()");
+            await host.Browser.CoreWebView2.CallDevToolsProtocolMethodAsync("Input.dispatchMouseEvent",JsonSerializer.Serialize(new{type="mouseMoved",x=uploadPoint.GetProperty("x").GetDouble(),y=uploadPoint.GetProperty("y").GetDouble()}));
+            await Until(host,"getComputedStyle(document.querySelector('#upload-icon-tooltip')).visibility==='visible' && document.querySelector('#upload-icon-tooltip').textContent==='停止辅助后可上传'");
+            await Capture(host,Path.Combine(output,"settings-scrolled-tooltip.png"));
+            host.Fixture=null;host.FixtureRunning=null;host.Publish();
+            await Capture(host,Path.Combine(output,"icon-settings.png"));await Eval(host,"document.querySelector('[data-target=close]').click()");await Until(host,"!document.querySelector('.jx3-settings')");
         });
         File.WriteAllText(Path.Combine(output,"web-ui-results.json"),JsonSerializer.Serialize(new{scope="Real WebView2 local React assets, actual .NET service in isolated demo; no game access, external mail or user clipboard writes",passed=results.Count-failed,total=results.Count,results},new JsonSerializerOptions{WriteIndented=true}));return failed==0?0:9;
     }

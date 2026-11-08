@@ -51,6 +51,11 @@ pwsh -NoProfile -File product/Publish-Candidate.ps1 -OutputDirectory delivery/JX
 
 发行名为 `JX3Artist-<版本>-Setup.exe` 和 `JX3Artist-<版本>-win-x64.zip`，ZIP 的根目录与其文件名去掉后缀一致。更新器按安装方式选取对应文件，使用 GitHub 正式 Release 的大小和 SHA‑256 校验。安装版保留原目录，便携版生成独立目录。
 
+v1.0.1 安装器需要 x64 启动器和 v1.0 迁移校验清单。在 x64 Visual Studio 工具命令行从 `product/installer` 编译启动器。迁移清单由公开 v1.0 ZIP 生成，脚本先核对发行 ZIP 的 SHA‑256。安装升级时只移除与清单逐字节匹配的旧文件，保留其他文件。
+
 ```powershell
-ISCC.exe /DPayload="C:\build\JX3Artist-1.0-win-x64" /DOutput="C:\build\release" product/installer/JX3Artist.iss
+rc /fo C:\build\Launcher.res Launcher.rc
+cl /O1 /MT /utf-8 /DUNICODE /D_UNICODE /FoC:\build\Launcher.obj /FeC:\build\Launcher.exe Launcher.c C:\build\Launcher.res user32.lib shell32.lib /link /SUBSYSTEM:WINDOWS
+py -3 legacy-manifest.py C:\build\JX3Artist-1.0-win-x64.zip C:\build\legacy.txt
+ISCC.exe /DPayload="C:\build\JX3Artist-1.0.1-win-x64" /DLauncher="C:\build\Launcher.exe" /DLegacyManifest="C:\build\legacy.txt" /DOutput="C:\build\release" JX3Artist.iss
 ```

@@ -38,6 +38,11 @@ internal static class ReleaseUpdater
     static readonly HttpClient Client = new(new HttpClientHandler { AllowAutoRedirect = false }) { Timeout = Timeout.InfiniteTimeSpan };
 
     internal static bool Installed => File.Exists(Path.Combine(AppContext.BaseDirectory, "install-mode.txt"));
+    internal static string InstallDirectory => Installed && Path.GetFileName(Path.TrimEndingDirectorySeparator(AppContext.BaseDirectory)) == "app"
+        && File.Exists(Path.Combine(AppContext.BaseDirectory, "..", "艺人助手.exe"))
+        ? Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..")) : AppContext.BaseDirectory;
+    internal static string EntryPath => InstallDirectory == AppContext.BaseDirectory
+        ? Path.Combine(AppContext.BaseDirectory, "JX3Artist.exe") : Path.Combine(InstallDirectory, "艺人助手.exe");
 
     internal static async Task<UpdateAsset?> Check(CancellationToken cancellation)
     {

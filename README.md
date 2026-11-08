@@ -12,14 +12,14 @@
 
 | 版本 | 适合谁 | 下载后怎么做 |
 | --- | --- | --- |
-| **安装版** | 希望以后从开始菜单打开，或在原目录升级 | 双击安装程序，按向导安装。可选创建桌面快捷方式。 [下载 Setup.exe](https://github.com/Ciderrr/jx3Art/releases/download/v1.0/JX3Artist-1.0-Setup.exe) |
-| **便携版** | 希望自己选文件夹，保留旧版目录 | 完整解压 ZIP，双击 `JX3Artist.exe`。 [下载 Windows ZIP](https://github.com/Ciderrr/jx3Art/releases/download/v1.0/JX3Artist-1.0-win-x64.zip) |
+| **安装版** | 希望以后从开始菜单打开，或在原目录升级 | 双击安装程序，按向导安装。默认创建桌面快捷方式，可取消。安装后也可双击目录中的 `艺人助手.exe`。 [下载 Setup.exe](https://github.com/Ciderrr/jx3Art/releases/download/v1.0.1/JX3Artist-1.0.1-Setup.exe) |
+| **便携版** | 希望自己选文件夹，保留旧版目录 | 完整解压 ZIP，双击 `JX3Artist.exe`。 [下载 Windows ZIP](https://github.com/Ciderrr/jx3Art/releases/download/v1.0.1/JX3Artist-1.0.1-win-x64.zip) |
 
 适用于 Windows 11 x64。两个版本都已内置 .NET 和图像识别环境。首次打开按 Windows 提示授权。若缺少用于显示界面的 WebView2，可在提示窗口一键安装或打开微软官网。
 
 更新时，在**设置 → 关于与反馈 → 检查更新**中操作。先停止辅助，再点击**下载并更新**。安装版在原目录升级，便携版解压到新版目录后打开，设置和经验继续使用同一数据目录。
 
-[查看安装界面](docs/images/setup.png) · [v1.0 发行说明](https://github.com/Ciderrr/jx3Art/releases/tag/v1.0) · [更新公告](CHANGELOG.md)
+[查看安装界面示例](docs/images/setup.png) · [v1.0.1 发行说明](https://github.com/Ciderrr/jx3Art/releases/tag/v1.0.1) · [更新公告](CHANGELOG.md)
 
 ## 使用步骤
 

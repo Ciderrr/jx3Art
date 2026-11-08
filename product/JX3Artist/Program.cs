@@ -85,7 +85,7 @@ internal static class Program
                 if(webWindow.PendingUpdate is UpdateLaunch update)
                 {
                     mutex?.ReleaseMutex();
-                    update.Start(AppContext.BaseDirectory);
+                    update.Start(ReleaseUpdater.InstallDirectory);
                 }
                 return code;
             }

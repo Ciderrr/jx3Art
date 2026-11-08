@@ -8,6 +8,8 @@ $ErrorActionPreference='Stop'
 if([string]::IsNullOrWhiteSpace($BackupDirectory)){$BackupDirectory=Join-Path $PSScriptRoot 'shortcut-backups'}
 if([string]::IsNullOrWhiteSpace($ShortcutName) -or $ShortcutName.IndexOfAny([IO.Path]::GetInvalidFileNameChars()) -ge 0){throw 'Invalid shortcut name'}
 $program=Join-Path $PSScriptRoot 'JX3Artist.exe'
+$launcher=Join-Path (Split-Path -Parent $PSScriptRoot) '艺人助手.exe'
+if((Split-Path -Leaf $PSScriptRoot) -eq 'app' -and (Test-Path -LiteralPath (Join-Path $PSScriptRoot 'install-mode.txt')) -and (Test-Path -LiteralPath $launcher -PathType Leaf)){$program=$launcher}
 $icon=Join-Path $PSScriptRoot 'Assets/AppIcon.ico'
 if(-not(Test-Path -LiteralPath $program) -or -not(Test-Path -LiteralPath $icon)){throw 'Keep the complete application folder before creating a shortcut.'}
 if([IO.Path]::GetFullPath($DesktopDirectory) -eq [Environment]::GetFolderPath('DesktopDirectory')){
@@ -26,7 +28,7 @@ if(Test-Path -LiteralPath $destination){
 $shell=New-Object -ComObject WScript.Shell
 $shortcut=$shell.CreateShortcut($destination)
 $shortcut.TargetPath=$program
-$shortcut.WorkingDirectory=$PSScriptRoot
+$shortcut.WorkingDirectory=Split-Path -Parent $program
 $shortcut.IconLocation=$icon+',0'
 $shortcut.Description='剑网3 艺人助手'
 $shortcut.Save()
