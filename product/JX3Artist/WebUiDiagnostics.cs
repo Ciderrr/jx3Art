@@ -97,6 +97,8 @@ internal static class WebUiDiagnostics
                 await Until(host,"!!document.querySelector('[role=tablist]')");
                 await Eval(host,"document.querySelectorAll('[role=tab]')[1].dispatchEvent(new MouseEvent('mousedown',{button:0,bubbles:true}))");
                 await Until(host,"!!document.querySelector('[data-about-action=checkUpdate]')");
+                string version=typeof(WebHostWindow).Assembly.GetName().Version!.ToString(3);
+                Assert((await Eval(host,$"document.querySelector('.jx3-about-version')?.textContent=== {JsonSerializer.Serialize("当前版本 v"+version)}")).GetBoolean(),"version label does not reflect the host version");
                 Assert((await Eval(host,"document.querySelector('.jx3-about-project').firstElementChild.textContent.includes('MIT 开源') && [...document.querySelectorAll('[data-about-action]')].every(b=>b.matches('.jx3-settings-button') && b.querySelector('.ss-button').dataset.variant==='secondary')")).GetBoolean(),"license or shared button style missing");
                 await Task.Delay(300);
                 await Capture(host,Path.Combine(output,"about-settings-dark.png"));

@@ -36,7 +36,14 @@ internal sealed class DistributionWindow : Window
         try
         {
             Icon = AppIcon.WindowSource();
-            header.Children.Add(new Image { Source = Icon, Width = 44, Height = 44, Margin = new Thickness(0,0,14,0) });
+            const int size = 44;
+            var art = new Image { Width = size, Height = size, Margin = new Thickness(0,0,14,0) };
+            void Fit(DpiScale dpi) => art.Source = AppIcon.ImageSource((int)Math.Ceiling(size * Math.Max(dpi.DpiScaleX, dpi.DpiScaleY)));
+            Fit(VisualTreeHelper.GetDpi(this));
+            SourceInitialized += (_,_) => Fit(VisualTreeHelper.GetDpi(this));
+            DpiChanged += (_,e) => Fit(e.NewDpi);
+            RenderOptions.SetBitmapScalingMode(art, BitmapScalingMode.HighQuality);
+            header.Children.Add(art);
         }
         catch (IOException) { }
         header.Children.Add(new TextBlock { Text = title, FontSize = 23, FontWeight = FontWeights.SemiBold, VerticalAlignment = VerticalAlignment.Center });
@@ -211,12 +218,14 @@ internal static class UpdateDialog
                         window.DialogResult = true;
                     }
                     catch (OperationCanceledException) when (cancellation.IsCancellationRequested) { result = null; }
+                    catch (OperationCanceledException) { window.Status.Text = "下载超时";window.Detail.Text = "请重试，或在浏览器打开发布页下载。"; }
                     catch (Exception ex) { window.Status.Text = "更新未完成";window.Detail.Text = ex.Message; }
                     finally { download.IsEnabled = true;dismiss.Content = "关闭";window.Progress.Visibility = Visibility.Collapsed; }
                 }
                 download = window.Action("下载并更新", Download, true);
             }
             catch (OperationCanceledException) when (cancellation.IsCancellationRequested) { }
+            catch (OperationCanceledException) { window.Status.Text = "检查更新超时";window.Detail.Text = "请重新打开更新窗口，或在浏览器打开发布页。"; }
             catch (Exception ex) { window.Status.Text = "暂时无法检查更新";window.Detail.Text = ex.Message; }
             finally { window.Progress.Visibility = Visibility.Collapsed; }
         };

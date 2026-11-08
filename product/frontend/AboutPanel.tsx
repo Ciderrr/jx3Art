@@ -9,7 +9,7 @@ type Area='project'|'updates'|'feedback';
 type Notice=SettingsMessage&{area:Area};
 type Action='openProfile'|'openAuthor'|'checkUpdate'|'copyEmail'|'openIssues';
 
-export function AboutPanel({bridge}:{bridge:Bridge}){
+export function AboutPanel({bridge,version}:{bridge:Bridge;version?:string}){
  const [notice,setNotice]=useState<Notice|null>(null);
  const [busy,setBusy]=useState<Action|null>(null);
 
@@ -37,7 +37,7 @@ export function AboutPanel({bridge}:{bridge:Bridge}){
    </section>
    <section aria-labelledby="about-updates">
      <div className="jx3-about-row">
-       <h3 id="about-updates">软件更新</h3>
+       <div><h3 id="about-updates">软件更新</h3>{version&&<p className="jx3-about-version">当前版本 v{version}</p>}</div>
        <SettingsButton data-about-action="checkUpdate" icon={<RefreshCw size={14} aria-hidden/>} disabled={busy!==null} onClick={()=>void run('checkUpdate','updates')}>{busy==='checkUpdate'?'正在检查…':'检查更新'}</SettingsButton>
      </div>
      {feedback('updates')}

@@ -13,6 +13,12 @@ internal static class AppIcon
     [DllImport("shell32.dll",CharSet=CharSet.Unicode)]static extern uint ExtractIconExW(string file,int index,[Out]nint[]? large,[Out]nint[]? small,uint count);
     [DllImport("user32.dll")]static extern nint SendMessageW(nint window,uint message,nint wParam,nint lParam);
     internal static BitmapFrame WindowSource()=>BitmapFrame.Create(new Uri(FilePath),BitmapCreateOptions.PreservePixelFormat,BitmapCacheOption.OnLoad);
+    internal static BitmapFrame ImageSource(int pixels)
+    {
+        var frames = new IconBitmapDecoder(new Uri(FilePath), BitmapCreateOptions.PreservePixelFormat, BitmapCacheOption.OnLoad)
+            .Frames.OrderBy(frame => frame.PixelWidth).ToArray();
+        return frames.FirstOrDefault(frame => frame.PixelWidth >= pixels) ?? frames[^1];
+    }
     internal static nint LoadNative(int size){nint icon=LoadImageW(0,FilePath,1,size,size,0x10);return icon!=0?icon:throw new IOException("助手图标资源未能加载，请保留完整程序目录。");}
     internal static void Release(nint icon){if(icon!=0)DestroyIcon(icon);}
     static byte[] Pixels(nint icon){var source=Imaging.CreateBitmapSourceFromHIcon(icon,System.Windows.Int32Rect.Empty,BitmapSizeOptions.FromEmptyOptions());var image=new FormatConvertedBitmap(source,PixelFormats.Bgra32,null,0);byte[] pixels=new byte[image.PixelWidth*image.PixelHeight*4];image.CopyPixels(pixels,image.PixelWidth*4,0);return pixels;}

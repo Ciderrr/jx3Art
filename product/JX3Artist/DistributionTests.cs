@@ -13,7 +13,8 @@ internal static class DistributionTests
         test("updates select matching stable GitHub assets and reject unexpected download targets", () =>
         {
             using var release = JsonDocument.Parse(ReleaseJson("v1.1", "JX3Artist-1.1-win-x64.zip", false));
-            if (ReleaseUpdater.ReadAsset(release.RootElement, new Version(1,0,0,0), false)?.Version != "1.1") throw new Exception("new ZIP not selected");
+            if (ReleaseUpdater.ReadAsset(release.RootElement, new Version(1,0,0,0), false) is not { Version: "1.1", GitHubId: 123L })
+                throw new Exception("new ZIP and its asset id were not selected");
             if (ReleaseUpdater.ReadAsset(release.RootElement, new Version(1,1,0,0), false) != null) throw new Exception("same version selected");
             using var installer = JsonDocument.Parse(ReleaseJson("v1.1", "JX3Artist-1.1-Setup.exe", false));
             if (ReleaseUpdater.ReadAsset(installer.RootElement, new Version(1,0,0,0), true)?.Installer != true) throw new Exception("installer not selected");
@@ -21,6 +22,35 @@ internal static class DistributionTests
             if (ReleaseUpdater.ReadAsset(prerelease.RootElement, new Version(1,0,0,0), false) != null) throw new Exception("pre-release selected");
             using var unsafeUrl = JsonDocument.Parse(ReleaseJson("v1.1", "JX3Artist-1.1-win-x64.zip", false).Replace("https://github.com/", "https://other.example/"));
             Reject(() => ReleaseUpdater.ReadAsset(unsafeUrl.RootElement, new Version(1,0,0,0), false));
+        });
+        test("release downloads use the binary asset API and retain the official browser fallback", () =>
+        {
+            var url = new Uri(ReleaseUpdater.Releases + "/download/v1.1/JX3Artist-1.1-Setup.exe");
+            var asset = new UpdateAsset("1.1", "JX3Artist-1.1-Setup.exe", 10, new string('a', 64), url, true, 123);
+            const string api = "https://api.github.com/repos/Ciderrr/jx3Art/releases/assets/123";
+            foreach (string outcome in new[] { "binary", "gateway", "json" })
+            {
+                var routes = new List<(string, bool)>();
+                Task<HttpResponseMessage> Fetch(Uri route, bool binary, CancellationToken _)
+                {
+                    routes.Add((route.AbsoluteUri, binary));
+                    if (binary && outcome == "gateway")
+                        throw new HttpRequestException("simulated gateway failure", null, System.Net.HttpStatusCode.GatewayTimeout);
+                    HttpContent content = binary && outcome == "json"
+                        ? new StringContent("{}", System.Text.Encoding.UTF8, "application/json")
+                        : new ByteArrayContent(new byte[] { 77, 90 });
+                    return Task.FromResult(new HttpResponseMessage(System.Net.HttpStatusCode.OK) { Content = content });
+                }
+                using var response = ReleaseUpdater.OpenAsset(asset, CancellationToken.None, Fetch).GetAwaiter().GetResult();
+                var expected = outcome == "binary" ? new[] { (api, true) } : new[] { (api, true), (url.AbsoluteUri, false) };
+                if (!routes.SequenceEqual(expected)) throw new Exception($"wrong routes for {outcome}");
+            }
+        });
+        test("distribution dialog icon selects a frame at or above the physical render size", () =>
+        {
+            foreach (var (pixels, width) in new[] { (44, 48), (66, 128), (88, 128), (300, 256) })
+                if (AppIcon.ImageSource(pixels).PixelWidth != width)
+                    throw new Exception($"unexpected image frame for {pixels}px");
         });
         test("portable update validates the whole archive before writing and refuses an existing version directory", () =>
         {
@@ -89,7 +119,7 @@ internal static class DistributionTests
     static string ReleaseJson(string tag, string asset, bool prerelease) => JsonSerializer.Serialize(new
     {
         tag_name = tag, draft = false, prerelease,
-        assets = new[] { new { name = asset, size = 200L, state = "uploaded", digest = "sha256:"+new string('a',64), browser_download_url = ReleaseUpdater.Releases+"/download/"+tag+"/"+asset } }
+        assets = new[] { new { id = 123L, name = asset, size = 200L, state = "uploaded", digest = "sha256:"+new string('a',64), browser_download_url = ReleaseUpdater.Releases+"/download/"+tag+"/"+asset } }
     });
 
     static void Write(ZipArchive archive, string name)

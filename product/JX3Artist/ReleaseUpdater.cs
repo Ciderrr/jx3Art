@@ -8,7 +8,7 @@ using System.Text.RegularExpressions;
 
 namespace JX3Artist;
 
-internal sealed record UpdateAsset(string Version, string Name, long Size, string Digest, Uri Url, bool Installer);
+internal sealed record UpdateAsset(string Version, string Name, long Size, string Digest, Uri Url, bool Installer, long GitHubId = 0);
 
 internal sealed record UpdateLaunch(string Path, bool Installer)
 {
@@ -32,7 +32,7 @@ internal sealed record UpdateLaunch(string Path, bool Installer)
 internal static class ReleaseUpdater
 {
     internal const string Releases = "https://github.com/Ciderrr/jx3Art/releases";
-    const string Latest = "https://api.github.com/repos/Ciderrr/jx3Art/releases/latest";
+    const string Api = "https://api.github.com/repos/Ciderrr/jx3Art/releases";
     const long MaxDownload = 512L * 1024 * 1024;
     const long MaxExpanded = 1024L * 1024 * 1024;
     static readonly HttpClient Client = new(new HttpClientHandler { AllowAutoRedirect = false }) { Timeout = Timeout.InfiniteTimeSpan };
@@ -48,7 +48,7 @@ internal static class ReleaseUpdater
     {
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellation);
         timeout.CancelAfter(TimeSpan.FromSeconds(20));
-        using var response = await Get(new Uri(Latest), timeout.Token);
+        using var response = await Get(new Uri(Api + "/latest"), false, timeout.Token);
         await using var input = await response.Content.ReadAsStreamAsync(timeout.Token);
         using var data = new MemoryStream();
         var buffer = new byte[8192];
@@ -78,12 +78,14 @@ internal static class ReleaseUpdater
             if (asset.GetProperty("state").GetString() != "uploaded" || asset.GetProperty("browser_download_url").GetString() != expected ||
                 !Regex.IsMatch(digest, @"\Asha256:[0-9a-fA-F]{64}\z") || size <= 0 || size > MaxDownload)
                 throw new IOException("发行文件的地址、大小或校验信息异常。");
-            return new(tag[1..], name, size, digest[7..], new Uri(expected), installer);
+            long id = asset.TryGetProperty("id", out var assetId) && assetId.ValueKind == JsonValueKind.Number &&
+                assetId.TryGetInt64(out long value) && value > 0 ? value : 0;
+            return new(tag[1..], name, size, digest[7..], new Uri(expected), installer, id);
         }
         throw new IOException("这个版本没有与你的安装方式对应的更新包。");
     }
 
-    static async Task<HttpResponseMessage> Get(Uri uri, CancellationToken cancellation)
+    static async Task<HttpResponseMessage> Get(Uri uri, bool binary, CancellationToken cancellation)
     {
         for (int hops = 0; hops < 6; hops++)
         {
@@ -92,7 +94,10 @@ internal static class ReleaseUpdater
                 throw new IOException("更新链接不在允许的 GitHub 地址范围内。");
             using var request = new HttpRequestMessage(HttpMethod.Get, uri);
             request.Headers.UserAgent.ParseAdd("JX3Artist-Update/1.0");
-            var response = await Client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellation);
+            if (binary) request.Headers.Accept.ParseAdd("application/octet-stream");
+            HttpResponseMessage response;
+            try { response = await Client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellation); }
+            catch (HttpRequestException ex) { throw new HttpRequestException($"无法连接 {uri.Host}。请确认代理可访问该地址。", ex); }
             if ((int)response.StatusCode is >= 300 and < 400)
             {
                 var next = response.Headers.Location;
@@ -100,11 +105,41 @@ internal static class ReleaseUpdater
                 uri = next != null ? new Uri(uri, next) : throw new IOException("GitHub 下载链接不完整。");
                 continue;
             }
-            if (response.IsSuccessStatusCode) return response;
+            if (response.StatusCode == System.Net.HttpStatusCode.OK) return response;
+            var status = response.StatusCode;
             response.Dispose();
-            throw new IOException("GitHub 暂时无法提供更新，请稍后重试或打开发布页。");
+            throw new HttpRequestException($"{uri.Host} 返回 HTTP {(int)status}。", null, status);
         }
         throw new IOException("GitHub 下载重定向次数过多。");
+    }
+
+    internal static async Task<HttpResponseMessage> OpenAsset(UpdateAsset asset, CancellationToken cancellation,
+        Func<Uri, bool, CancellationToken, Task<HttpResponseMessage>> fetch)
+    {
+        async Task<HttpResponseMessage> Binary(Uri uri, bool api)
+        {
+            var response = await fetch(uri, api, cancellation);
+            string? content = response.Content.Headers.ContentType?.MediaType;
+            if (content == "text/html" || content == "application/json" || content?.EndsWith("+json", StringComparison.OrdinalIgnoreCase) == true)
+            {
+                response.Dispose();
+                throw new HttpRequestException($"{uri.Host} 未返回更新文件。");
+            }
+            return response;
+        }
+
+        HttpRequestException? apiError = null;
+        if (asset.GitHubId > 0)
+        {
+            try { return await Binary(new Uri(Api + "/assets/" + asset.GitHubId), true); }
+            catch (HttpRequestException ex) { apiError = ex; }
+        }
+        cancellation.ThrowIfCancellationRequested();
+        try { return await Binary(asset.Url, false); }
+        catch (HttpRequestException ex) when (apiError != null)
+        {
+            throw new HttpRequestException($"两种 GitHub 下载方式均未成功。{apiError.Message} {ex.Message} 可重试或在发布页下载。", ex);
+        }
     }
 
     internal static async Task<UpdateLaunch> Download(UpdateAsset asset, string dataRoot, IProgress<int> progress, CancellationToken cancellation,
@@ -117,7 +152,9 @@ internal static class ReleaseUpdater
         string file = Path.Combine(work, asset.Name);
         try
         {
-            using var response = await (testDownload ?? Get)(asset.Url, timeout.Token);
+            using var response = testDownload == null
+                ? await OpenAsset(asset, timeout.Token, Get)
+                : await testDownload(asset.Url, timeout.Token);
             await using var input = await response.Content.ReadAsStreamAsync(timeout.Token);
             using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
             long total = 0;
