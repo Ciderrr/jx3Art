@@ -341,9 +341,9 @@ internal static class WebUiDiagnostics
         await Until(host,"!document.querySelector('[data-client=wujie]').hasAttribute('aria-disabled')");
         var reduced=(await Eval(host,"matchMedia('(prefers-reduced-motion: reduce)').matches")).GetBoolean();
         var width=await Eval(host,"document.querySelector('[aria-label=客户端模式]').getBoundingClientRect().width");
-        await Eval(host,"window.__clientMotion=[];(()=>{const start=performance.now();const tick=()=>{window.__clientMotion.push(document.getAnimations().filter(a=>a.animationName?.startsWith('client-surface')).map(a=>({name:a.animationName,progress:a.effect.getComputedTiming().progress})));if(performance.now()-start<650)requestAnimationFrame(tick);};requestAnimationFrame(tick);document.querySelector('[data-client=wujie]').click();})()");
+        await Eval(host,"window.__clientMotion=[];(()=>{const start=performance.now();const tick=()=>{window.__clientMotion.push(document.getAnimations().filter(a=>a.animationName==='curtain-open').map(a=>({name:a.animationName,progress:a.effect.getComputedTiming().progress})));if(performance.now()-start<650)requestAnimationFrame(tick);};requestAnimationFrame(tick);document.querySelector('[data-client=wujie]').click();})()");
         await Until(host,"window.__artistSnapshot.wujieTrial && [...document.querySelectorAll('[data-client-label]')].some(x=>x.dataset.clientLabel.includes('极速端'))");
-        if(!reduced)await Until(host,"window.__clientMotion.some(xs=>xs.some(x=>x.name==='client-surface-in'&&x.progress>0&&x.progress<1)&&xs.some(x=>x.name==='client-surface-out'&&x.progress>0&&x.progress<1))");
+        if(!reduced)await Until(host,"window.__clientMotion.some(xs=>xs.some(x=>x.name==='curtain-open'&&x.progress>0&&x.progress<1))");
         await Until(host,"!document.documentElement.dataset.clientTransition");
         Assert((await Eval(host,"(()=>{const s=document.querySelector('.jx3-paper');return getComputedStyle(s).viewTransitionName==='artist-surface' && ['header','main','footer'].every(x=>s.querySelector(x));})()")).GetBoolean(),
             "client transition does not include header, main content and footer");
@@ -389,7 +389,7 @@ internal static class WebUiDiagnostics
         await OpenClientMenu();
         await Eval(host,"document.querySelector('[data-client=flagship]').click()");
         await Until(host,"!window.__artistSnapshot.wujieTrial && document.querySelector('[data-client-label]').dataset.clientLabel.includes('旗舰端')");
-        Assert((await Eval(host,"!document.documentElement.dataset.clientTransition && !document.getAnimations().some(a=>a.animationName?.startsWith('client-surface'))")).GetBoolean(),
+        Assert((await Eval(host,"!document.documentElement.dataset.clientTransition && !document.getAnimations().some(a=>a.animationName==='curtain-open')")).GetBoolean(),
             "reduced motion still animates the client surface");
         double future=FrameTiming.NowMs()+45000;
         host.FixtureRunning=true;
@@ -404,7 +404,7 @@ internal static class WebUiDiagnostics
         await Until(host,"window.__artistSnapshot.waitingHint==='minimized' && window.__artistSnapshot.seconds>0 && !!document.querySelector('.jx3-window-wait .lucide-eye-off') && document.querySelector('.jx3-window-wait').textContent.includes('估算时间') && document.querySelector('.jx3-action-slot').nextElementSibling?.matches('.jx3-window-wait')");
         await Capture(host,Path.Combine(output,"minimized-estimate.png"));
         host.Fixture=host.Fixture with{MinimizedDeadline=FrameTiming.NowMs()-1};host.Publish();
-        await Until(host,"window.__artistSnapshot.seconds===null && document.querySelector('.jx3-window-wait').textContent.includes('预计到时') && !!document.querySelector('[aria-label=剩余时间未确认]')");
+        await Until(host,"window.__artistSnapshot.seconds===null && document.querySelector('.jx3-window-wait').textContent.includes('预计到时') && document.querySelector('.jx3-time').textContent.trim()===''");
         host.Fixture=new(Phase.WaitingVisibility,"隔离等待",ForegroundRecovery:true);
         host.Publish();
         await Until(host,"window.__artistSnapshot.waitingHint==='foreground' && document.querySelector('.jx3-window-wait').textContent.includes('本轮计划已保留')");

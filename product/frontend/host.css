@@ -55,13 +55,4 @@ html[data-client-capture=true] .jx3-menu{visibility:hidden}
 html[data-client-transition=running]::view-transition-group(root){animation:none}
 html[data-client-transition=running]::view-transition-old(root){animation:none;opacity:0}
 html[data-client-transition=running]::view-transition-new(root){animation:none}
-html[data-client-transition=running]::view-transition-group(artist-surface){animation-duration:850ms}
-html[data-client-transition=running]::view-transition-old(artist-surface){
- animation:client-surface-out 850ms ease-out both;
-}
-html[data-client-transition=running]::view-transition-new(artist-surface){
- mask-image:none;
- animation:client-surface-in 850ms cubic-bezier(.22,.61,.36,1) both;
-}
-@keyframes client-surface-out{to{filter:brightness(.92)}}
-@keyframes client-surface-in{from{clip-path:circle(0% at 0% 100%)}to{clip-path:circle(155% at 0% 100%)}}
+html[data-client-transition=running]::view-transition-new(artist-surface){--curtain-origin:0% 100%}
