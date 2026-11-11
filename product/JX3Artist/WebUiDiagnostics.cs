@@ -11,9 +11,56 @@ internal static class WebUiDiagnostics
     internal static int Run(string[] args)
     {
         int i=Array.IndexOf(args,"--out");if(i<0||i+1>=args.Length)return 2;string output=Path.GetFullPath(args[i+1]);Directory.CreateDirectory(output);
-        var app=new Application{ShutdownMode=ShutdownMode.OnExplicitShutdown};var experience=new ExperienceSession(Path.Combine(output,"data"));var host=new WebHostWindow(Path.Combine(output,"data"),"not-used",true,experience:experience){Diagnostic=true,WindowStartupLocation=WindowStartupLocation.Manual,Left=-12000,Top=-12000,ShowActivated=false,ShowInTaskbar=false};
-        host.Loaded+=(_,_)=>host.Dispatcher.BeginInvoke(new Action(async()=>{int code=9;try{code=await Check(host,output,args.Contains("--ui-offscreen"));}catch(Exception ex){File.WriteAllText(Path.Combine(output,"web-ui-error.txt"),ex.ToString());}finally{host.Stop("diagnostic_end");await Wait(()=>!host.Service.IsRunning);host.Close();experience.Dispose();app.Shutdown(code);}}));
+        if(args.Contains("--close-process-test"))return CheckCloseProcess(output,args.Contains("--block-browser-close"),args.Contains("--tray-exit-test"));
+        bool clientTest=args.Contains("--wujie-menu-test");
+        var app=new Application{ShutdownMode=ShutdownMode.OnExplicitShutdown};var experience=new ExperienceSession(Path.Combine(output,"data"));var host=new WebHostWindow(Path.Combine(output,"data"),"not-used",true,experience:experience,wujieTemplates:clientTest?"isolated-demo":null){Diagnostic=true,WindowStartupLocation=WindowStartupLocation.Manual,Left=-12000,Top=-12000,ShowActivated=false,ShowInTaskbar=false};
+        host.Loaded+=(_,_)=>host.Dispatcher.BeginInvoke(new Action(async()=>{int code=9;try{code=clientTest?await CheckClientMenu(host,output):await Check(host,output,args.Contains("--ui-offscreen"));}catch(Exception ex){File.WriteAllText(Path.Combine(output,"web-ui-error.txt"),ex.ToString());}finally{host.Stop("diagnostic_end");await Wait(()=>!host.Service.IsRunning);host.Close();experience.Dispose();app.Shutdown(code);}}));
         return app.Run(host);
+    }
+    static int CheckCloseProcess(string output,bool blockBrowser,bool trayExit)
+    {
+        string data=Path.Combine(output,"data");
+        var app=new Application{ShutdownMode=ShutdownMode.OnMainWindowClose};
+        using var recording=new ResourceRecording(data);
+        using var experience=new ExperienceSession(data);
+        var host=new WebHostWindow(data,"not-used",true,recording,experience)
+        {
+            Diagnostic=true,WindowStartupLocation=WindowStartupLocation.Manual,Left=-12000,Top=-12000,
+            ShowActivated=false,ShowInTaskbar=false
+        };
+        app.MainWindow=host;
+        string trace=Path.Combine(output,"close-stages.txt");
+        void Stage(string value)=>File.AppendAllLines(trace,[value]);
+        if(blockBrowser)host.BlockBrowserCloseForTest=()=>{Stage("browser cleanup blocked");Thread.Sleep(Timeout.Infinite);};
+        host.Closing+=(_,_)=>Stage("closing");
+        host.Closed+=(_,_)=>Stage("closed");
+        host.Loaded+=(_,_)=>host.Dispatcher.BeginInvoke(new Action(async()=>
+        {
+            try
+            {
+                await Wait(()=>host.Ready);
+                await Until(host,"!!window.__artistSnapshot && !!document.querySelector('.jx3-window-close')");
+                if(trayExit)
+                {
+                    Stage("requested from tray exit action");
+                    host.DispatchTrayAction(TrayAction.Exit);
+                }
+                else
+                {
+                    Stage("requested from web control");
+                    await Eval(host,"setTimeout(()=>document.querySelector('.jx3-window-close').click(),0)");
+                }
+            }
+            catch(Exception error){Stage(error.ToString());app.Shutdown(9);}
+        }));
+        int result=app.Run(host);
+        Stage("application run returned");
+        experience.Dispose();
+        recording.Dispose();
+        bool complete=recording.Health.Closed;
+        File.WriteAllText(Path.Combine(output,"close-process-result.json"),
+            JsonSerializer.Serialize(new{passed=result==0&&complete,resourceRecordingClosed=complete,scope="isolated WebView2 process"}));
+        return result==0&&complete?0:9;
     }
     static async Task Wait(Func<bool> condition,int timeout=15000){var at=DateTime.UtcNow;while(!condition()){if((DateTime.UtcNow-at).TotalMilliseconds>timeout)throw new TimeoutException("WebView2 diagnostic timed out");await Task.Delay(30);}}
     static async Task<JsonElement> Eval(WebHostWindow host,string code){string json=await host.Browser.CoreWebView2.ExecuteScriptAsync(code);using var doc=JsonDocument.Parse(json);return doc.RootElement.Clone();}
@@ -26,12 +73,12 @@ internal static class WebUiDiagnostics
     {
         var results=new List<object>();int failed=0;
         async Task Test(string name,Func<Task> action){try{await action();results.Add(new{name,passed=true});}catch(Exception ex){failed++;results.Add(new{name,passed=false,error=ex.Message});}}
-        void Assert(bool condition,string message){if(!condition)throw new Exception(message);}
         await Wait(()=>host.Ready,20000);await Until(host,"!!document.querySelector('.jx3-paper')");
         File.WriteAllText(Path.Combine(output,"runtime.json"),JsonSerializer.Serialize(new{runtime=host.Browser.CoreWebView2.Environment.BrowserVersionString,viewport=await Eval(host,"({width:innerWidth,height:innerHeight,scale:devicePixelRatio})"),origin=host.Browser.Source.ToString()}));
         var nativeProcess=System.Diagnostics.Process.GetCurrentProcess();var browserProcesses=new List<object>();foreach(var info in host.Browser.CoreWebView2.Environment.GetProcessInfos()){try{using var process=System.Diagnostics.Process.GetProcessById(info.ProcessId);browserProcesses.Add(new{kind=info.Kind.ToString(),pid=info.ProcessId,workingSetBytes=process.WorkingSet64,privateBytes=process.PrivateMemorySize64});}catch{}}
         File.WriteAllText(Path.Combine(output,"own-ui-resources.json"),JsonSerializer.Serialize(new{host=new{pid=nativeProcess.Id,workingSetBytes=nativeProcess.WorkingSet64,privateBytes=nativeProcess.PrivateMemorySize64},browserProcesses,note="own UI process snapshots; summed working sets are not deduplicated physical RAM"}));
         if(renderOnly){
+            DistributionTests.RenderUpdatePreviews(output);
             host.Fixture=new(Phase.Performing,"隔离渲染状态",2,CountdownEnd:FrameTiming.NowMs()+1122000);host.FixtureRunning=true;host.Publish();await Until(host,"window.__artistSnapshot?.seconds>1100");await Capture(host,Path.Combine(output,"tracking.png"));
             foreach(string skin in UiTheme.Palettes.Keys){host.Execute("setSkin",JsonSerializer.SerializeToElement(new{skin}));host.Publish();await Until(host,$"window.__artistSnapshot?.skin==={JsonSerializer.Serialize(skin)}");await Capture(host,Path.Combine(output,"skin-"+skin+".png"));}
             host.Execute("setSkin",JsonSerializer.SerializeToElement(new{skin="幕间"}));host.Fixture=new(Phase.WaitingVisibility,"画面证据不足");host.Publish();await Until(host,"window.__artistSnapshot?.phase==='WaitingVisibility'");await Capture(host,Path.Combine(output,"waiting.png"));
@@ -40,8 +87,20 @@ internal static class WebUiDiagnostics
         await Test("local React page initialized with real zero session estimate and native snapshot",async()=>{Assert(WebUiProtocol.Trusted(host.Browser.Source.ToString()),"foreign source");Assert((await Eval(host,"window.__artistSnapshot.gain")).GetString()=="0","mock experience remains");Assert((await Eval(host,"document.querySelectorAll('.jx3-action').length")).GetInt32()==1,"not single primary action");Assert((await Eval(host,"!!document.querySelector('footer')")).GetBoolean(),"footer missing");Assert(host.Icon!=null,"native window icon missing");Assert(AppIcon.WindowMatchesSource(new System.Windows.Interop.WindowInteropHelper(host).Handle,out int iconSize),"native window icon differs from EXE/tray source");File.WriteAllText(Path.Combine(output,"app-icon-runtime.json"),JsonSerializer.Serialize(new{nativeWindowIconSize=iconSize,windowIconMatchesSource=true}));await Until(host,"document.querySelector('.jx3-brand img').complete && document.querySelector('.jx3-brand img').naturalWidth>0");});
         await Test("revised startup preparation idle guidance and unknown artist guidance do not start input",async()=>{
             Assert((await Eval(host,"document.querySelector('.jx3-fallback').textContent.includes('请开启艺人身份，站在平整路面上，开始辅助吧！')")).GetBoolean(),"idle guidance missing");
-            host.Diagnostic=false;try{host.Execute("ready",JsonSerializer.SerializeToElement(new{}));host.Publish();await Until(host,"!!document.querySelector('.jx3-preparation')");Assert(!host.Service.IsRunning,"startup reminder started automation");await Capture(host,Path.Combine(output,"startup-preparation.png"));host.Execute("cancelPreparation",JsonSerializer.SerializeToElement(new{}));host.Publish();await Until(host,"!document.querySelector('.jx3-preparation')");await Wait(()=>!host.Editing);}finally{host.Diagnostic=true;}
-            host.Fixture=new(Phase.WaitingVisibility,"画面证据不足");host.FixtureRunning=true;host.Publish();await Until(host,"window.__artistSnapshot.phase==='WaitingVisibility'");Assert((await Eval(host,"document.querySelector('.jx3-fallback').textContent.includes('开启艺人身份') && document.querySelector('.jx3-fallback').textContent.includes('不会据此点击')")).GetBoolean(),"unknown guidance hides action or guard");await Capture(host,Path.Combine(output,"artist-guidance.png"));host.Fixture=null;host.FixtureRunning=null;host.Publish();Assert(!host.Service.IsRunning,"unknown guidance started backend");
+            host.Diagnostic=false;try{host.Execute("ready",JsonSerializer.SerializeToElement(new{}));host.Publish();await Until(host,"!!document.querySelector('.jx3-preparation')");Assert(!host.Service.IsRunning,"startup reminder started automation");await Capture(host,Path.Combine(output,"startup-preparation.png"));
+            host.Execute("setAutomatic",JsonSerializer.SerializeToElement(new{enabled=true}));host.Publish();
+            await Until(host,"['Windows 可能拒绝切换','建议让游戏保持在前台','任务栏图标可能会闪动'].every(text=>document.querySelector('.jx3-preparation .jx3-hint').textContent.includes(text))");
+            Assert((await Eval(host,"!!document.querySelector('.jx3-preparation .jx3-takeover-hint[data-automatic=true] .lucide-bell-ring')")).GetBoolean(),
+                "automatic warning bell missing");
+            await Capture(host,Path.Combine(output,"startup-automatic-advice.png"));
+            host.Execute("setAutomatic",JsonSerializer.SerializeToElement(new{enabled=false}));host.Publish();
+            host.Execute("cancelPreparation",JsonSerializer.SerializeToElement(new{}));host.Publish();await Until(host,"!document.querySelector('.jx3-preparation')");await Wait(()=>!host.Editing);}finally{host.Diagnostic=true;}
+            host.Fixture=new(Phase.WaitingVisibility,"画面证据不足",NextCheck:FrameTiming.NowMs()+6000);host.FixtureRunning=true;host.Publish();
+            await Until(host,"window.__artistSnapshot.phase==='WaitingVisibility' && document.querySelector('.jx3-fallback').textContent.includes('开启艺人身份') && /助手会在 [1-6] 秒之后再次自动检查/.test(document.querySelector('.jx3-fallback').textContent)");
+            await Capture(host,Path.Combine(output,"artist-guidance.png"));
+            host.Fixture=host.Fixture with{NextCheck=FrameTiming.NowMs()-1};host.Publish();
+            await Until(host,"document.querySelector('.jx3-fallback').textContent.includes('助手正在自动检查。')");
+            host.Fixture=null;host.FixtureRunning=null;host.Publish();Assert(!host.Service.IsRunning,"unknown guidance started backend");
         });
         await Test("integrated caption uses native drag regions and window lifecycle controls",async()=>{
             Assert(host.WindowStyle==WindowStyle.None&&System.Windows.Shell.WindowChrome.GetWindowChrome(host)?.ResizeBorderThickness.Left>0,"system caption or resize support missing");Assert(host.Browser.CoreWebView2.Settings.IsNonClientRegionSupportEnabled,"native drag support disabled");
@@ -70,6 +129,11 @@ internal static class WebUiDiagnostics
         await Test("homepage uses reference footer plan dialog and no old records expander",async()=>{
             var positions=await Eval(host,"(()=>{const r=e=>{const x=e.getBoundingClientRect();return {x:x.x,y:x.y,width:x.width,height:x.height}};return {footer:r(document.querySelector('footer')),action:r(document.querySelector('.jx3-action')),view:{width:innerWidth,height:innerHeight}}})()");File.WriteAllText(Path.Combine(output,"positions.json"),positions.GetRawText());
             await Eval(host,"document.querySelector('.jx3-plan-picker').click()");await Until(host,"!!document.querySelector('[role=dialog]')");await Eval(host,"(()=>{const i=document.querySelector('input[aria-label=自定义次数]');const s=Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set;s.call(i,'37');i.dispatchEvent(new Event('input',{bubbles:true}));})()");await Eval(host,"[...document.querySelectorAll('button')].find(x=>x.textContent==='应用计划').click()");await Until(host,"window.__artistSnapshot.plan===37");await Until(host,"!document.querySelector('.jx3-plan-dialog')");await Wait(()=>!host.Editing);Assert(!host.Service.IsRunning,"plan started backend");
+            host.Execute("setPlan",JsonSerializer.SerializeToElement(new{limit=0}));host.Publish();
+            await Until(host,"document.querySelector('.jx3-plan-continuous')?.textContent==='持续运行'");
+            Assert((await Eval(host,"parseFloat(getComputedStyle(document.querySelector('.jx3-plan-continuous')).fontSize)===24 && parseFloat(getComputedStyle(document.querySelector('.jx3-plan-picker')).fontSize)===26")).GetBoolean(),
+                "continuous label and numeric plan do not have separate sizes");
+            host.Execute("setPlan",JsonSerializer.SerializeToElement(new{limit=37}));host.Publish();
         });
         await Test("real preparation command cancellation does not start or suppress reminder",async()=>{
             await Eval(host,"document.querySelector('.jx3-action').click()");await Until(host,"!!window.__artistSnapshot.preparationToken");await Eval(host,"document.querySelector('.jx3-preparation .jx3-dialog-actions button').click()");await Until(host,"!window.__artistSnapshot.preparationToken");await Until(host,"!document.querySelector('.jx3-preparation')");await Wait(()=>!host.Editing);Assert(!host.Service.IsRunning,"cancel started backend");
@@ -142,7 +206,7 @@ internal static class WebUiDiagnostics
             }
         });
         await Test("real automatic mode and visible explanation agree before start",async()=>{
-            host.Execute("setAutomatic",JsonSerializer.SerializeToElement(new{enabled=true}));host.Publish();await Until(host,"window.__artistSnapshot.automatic===true");Assert(host.Service.Mode.Enabled,"UI choice not bound to real mode");Assert((await Eval(host,"document.querySelector('aside .jx3-hint').textContent.includes('自动切回游戏')")).GetBoolean(),"manual hint contradicts switch");
+            host.Execute("setAutomatic",JsonSerializer.SerializeToElement(new{enabled=true}));host.Publish();await Until(host,"window.__artistSnapshot.automatic===true");Assert(host.Service.Mode.Enabled,"UI choice not bound to real mode");Assert((await Eval(host,"['自动切回游戏','Windows 可能拒绝切换','建议让游戏保持在前台','任务栏图标可能会闪动'].every(text=>document.querySelector('aside .jx3-hint').textContent.includes(text))")).GetBoolean(),"manual hint contradicts switch");
         });
         await Test("actual settings recorder captures DOM combination and persists native keys",async()=>{
             await Eval(host,"(()=>{const b=document.querySelector('[data-target=menu]');b.focus();b.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',bubbles:true}));})()");await Until(host,"!!document.querySelector('[data-target=settings]')");await Eval(host,"document.querySelector('[data-target=settings]').click()");await Until(host,"!!document.querySelector('[aria-label=录入开始快捷键]')");await Task.Delay(350);Assert((await Eval(host,"document.activeElement===document.querySelector('.jx3-settings-title') && document.activeElement!==document.querySelector('[data-target=close]')")).GetBoolean(),"settings auto-focused close button");Assert((await Eval(host,"getComputedStyle(document.querySelector('.jx3-window-actions button')).pointerEvents==='auto' && !document.querySelector('.jx3-paper').contains(document.querySelector('.jx3-window-actions'))")).GetBoolean(),"caption controls trapped beneath modal or scaled content");await Capture(host,Path.Combine(output,"settings-first-open.png"));await host.Browser.CoreWebView2.CallDevToolsProtocolMethodAsync("Input.dispatchKeyEvent","{\"type\":\"keyDown\",\"key\":\"Tab\",\"code\":\"Tab\",\"windowsVirtualKeyCode\":9}");await Until(host,"document.activeElement===document.querySelector('[data-target=close]')");Assert((await Eval(host,"document.activeElement.matches(':focus-visible')")).GetBoolean(),"keyboard focus ring removed");
@@ -261,4 +325,100 @@ internal static class WebUiDiagnostics
         File.WriteAllText(Path.Combine(output,"web-ui-results.json"),JsonSerializer.Serialize(new{scope="Real WebView2 local React assets, actual .NET service in isolated demo; no game access, external mail or user clipboard writes",passed=results.Count-failed,total=results.Count,results},new JsonSerializerOptions{WriteIndented=true}));return failed==0?0:9;
     }
     static long hostSnapshotGain(WebHostWindow host)=>long.Parse(JsonSerializer.SerializeToElement(host.Snapshot()).GetProperty("gain").GetString()!,System.Globalization.CultureInfo.InvariantCulture);
+    static void Assert(bool condition,string message){if(!condition)throw new Exception(message);}
+
+    static async Task<int> CheckClientMenu(WebHostWindow host,string output)
+    {
+        await Wait(()=>host.Ready);
+        await Until(host,"window.__artistSnapshot?.wujieAvailable===true && window.__artistSnapshot.wujieTrial===false");
+        string settings=Path.Combine(output,"data","settings.json");
+        async Task OpenClientMenu()
+        {
+            await Eval(host,"(()=>{const b=document.querySelector('[aria-label=客户端模式]');b.focus();b.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',bubbles:true}));})()");
+            await Until(host,"!!document.querySelector('[data-client=wujie]')");
+        }
+        await OpenClientMenu();
+        await Until(host,"!document.querySelector('[data-client=wujie]').hasAttribute('aria-disabled')");
+        var reduced=(await Eval(host,"matchMedia('(prefers-reduced-motion: reduce)').matches")).GetBoolean();
+        var width=await Eval(host,"document.querySelector('[aria-label=客户端模式]').getBoundingClientRect().width");
+        await Eval(host,"window.__clientMotion=[];(()=>{const start=performance.now();const tick=()=>{window.__clientMotion.push(document.getAnimations().filter(a=>a.animationName?.startsWith('client-surface')).map(a=>({name:a.animationName,progress:a.effect.getComputedTiming().progress})));if(performance.now()-start<650)requestAnimationFrame(tick);};requestAnimationFrame(tick);document.querySelector('[data-client=wujie]').click();})()");
+        await Until(host,"window.__artistSnapshot.wujieTrial && [...document.querySelectorAll('[data-client-label]')].some(x=>x.dataset.clientLabel.includes('极速端'))");
+        if(!reduced)await Until(host,"window.__clientMotion.some(xs=>xs.some(x=>x.name==='client-surface-in'&&x.progress>0&&x.progress<1)&&xs.some(x=>x.name==='client-surface-out'&&x.progress>0&&x.progress<1))");
+        await Until(host,"!document.documentElement.dataset.clientTransition");
+        Assert((await Eval(host,"(()=>{const s=document.querySelector('.jx3-paper');return getComputedStyle(s).viewTransitionName==='artist-surface' && ['header','main','footer'].every(x=>s.querySelector(x));})()")).GetBoolean(),
+            "client transition does not include header, main content and footer");
+        Assert(Math.Abs(width.GetDouble()-(await Eval(host,"document.querySelector('[aria-label=客户端模式]').getBoundingClientRect().width")).GetDouble())<1,
+            "client mode transition shifted the toolbar");
+        File.WriteAllText(Path.Combine(output,"client-motion-frames.json"),(await Eval(host,"window.__clientMotion")).GetRawText());
+        await Capture(host,Path.Combine(output,"client-mode-selected.png"));
+        await Until(host,"!document.querySelector('[data-client=wujie]')");
+        Assert(UiPreferences.Load(settings).useWujie&&!host.Service.IsRunning,"Wujie selection was not saved or started a worker");
+        await OpenClientMenu();
+        await Eval(host,"document.querySelector('[data-client=flagship]').click()");
+        await Until(host,"!window.__artistSnapshot.wujieTrial && document.querySelectorAll('[data-client-label]').length===1 && document.querySelector('[data-client-label]').dataset.clientLabel.includes('旗舰端')");
+        await Until(host,"!document.querySelector('[data-client=wujie]')");
+        Assert(!UiPreferences.Load(settings).useWujie&&!host.Service.IsRunning,"flagship selection was not saved or started a worker");
+
+        host.Execute("requestStart",JsonSerializer.SerializeToElement(new{}));
+        var pending=JsonSerializer.SerializeToElement(host.Snapshot()).GetProperty("preparationToken").GetString();
+        Assert(pending!=null,"start confirmation missing");
+        long epoch=host.Epoch;
+        host.Execute("setClient",JsonSerializer.SerializeToElement(new{mode="wujie"}));
+        Assert(host.Epoch>epoch,"client switch did not revoke pending start");
+        try{host.Execute("confirmStart",JsonSerializer.SerializeToElement(new{token=pending,skip=false}));throw new Exception("previous client confirmation started worker");}
+        catch(InvalidOperationException){}
+        Assert(!host.Service.IsRunning,"client change started worker");
+
+        Assert(host.Service.Start(1,useWujie:true),"demo worker did not start");
+        await Wait(()=>host.Service.IsRunning);
+        host.Publish();
+        await Until(host,"window.__artistSnapshot.running");
+        await OpenClientMenu();
+        await Until(host,"document.querySelector('[data-client=flagship]').hasAttribute('aria-disabled') && document.querySelector('[data-client=flagship]').textContent.includes('停止后切换') && !!document.querySelector('.jx3-client-lock')");
+        try{host.Execute("setClient",JsonSerializer.SerializeToElement(new{mode="flagship"}));throw new Exception("running client switched");}
+        catch(InvalidOperationException){}
+        Assert(UiPreferences.Load(settings).useWujie,"running client setting changed");
+        host.Stop("client_motion_diagnostic");
+        await Wait(()=>!host.Service.IsRunning);
+        await Until(host,"!window.__artistSnapshot.running");
+        await Eval(host,"document.querySelector('[role=menu]')?.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}))");
+        await Until(host,"!document.querySelector('[data-client=wujie]')");
+        await host.Browser.CoreWebView2.CallDevToolsProtocolMethodAsync("Emulation.setEmulatedMedia",
+            "{\"features\":[{\"name\":\"prefers-reduced-motion\",\"value\":\"reduce\"}]}");
+        await Until(host,"matchMedia('(prefers-reduced-motion: reduce)').matches && window.__artistSnapshot.wujieTrial");
+        await OpenClientMenu();
+        await Eval(host,"document.querySelector('[data-client=flagship]').click()");
+        await Until(host,"!window.__artistSnapshot.wujieTrial && document.querySelector('[data-client-label]').dataset.clientLabel.includes('旗舰端')");
+        Assert((await Eval(host,"!document.documentElement.dataset.clientTransition && !document.getAnimations().some(a=>a.animationName?.startsWith('client-surface'))")).GetBoolean(),
+            "reduced motion still animates the client surface");
+        double future=FrameTiming.NowMs()+45000;
+        host.FixtureRunning=true;
+        host.Fixture=new(Phase.Performing,"隔离计时",CountdownEnd:future,DisplayDeadline:future,CountdownEstimated:true);
+        host.Publish();
+        await Until(host,"window.__artistSnapshot.seconds>0 && !document.querySelector('.jx3-countdown-estimate')");
+        host.Fixture=host.Fixture with{DisplayDeadline=FrameTiming.NowMs()-1};
+        host.Publish();
+        await Until(host,"window.__artistSnapshot.seconds===null && !document.querySelector('.jx3-countdown-estimate')");
+        host.Fixture=new(Phase.WaitingVisibility,"隔离最小化",GameMinimized:true,MinimizedDeadline:future);
+        host.Publish();
+        await Until(host,"window.__artistSnapshot.waitingHint==='minimized' && window.__artistSnapshot.seconds>0 && !!document.querySelector('.jx3-window-wait .lucide-eye-off') && document.querySelector('.jx3-window-wait').textContent.includes('估算时间') && document.querySelector('.jx3-action-slot').nextElementSibling?.matches('.jx3-window-wait')");
+        await Capture(host,Path.Combine(output,"minimized-estimate.png"));
+        host.Fixture=host.Fixture with{MinimizedDeadline=FrameTiming.NowMs()-1};host.Publish();
+        await Until(host,"window.__artistSnapshot.seconds===null && document.querySelector('.jx3-window-wait').textContent.includes('预计到时') && !!document.querySelector('[aria-label=剩余时间未确认]')");
+        host.Fixture=new(Phase.WaitingVisibility,"隔离等待",ForegroundRecovery:true);
+        host.Publish();
+        await Until(host,"window.__artistSnapshot.waitingHint==='foreground' && document.querySelector('.jx3-window-wait').textContent.includes('本轮计划已保留')");
+        await Capture(host,Path.Combine(output,"waiting-game-foreground.png"));
+        host.Fixture=host.Fixture with{AwaitingApproval=true};host.Publish();
+        await Until(host,"window.__artistSnapshot.awaitingApproval && document.querySelector('.jx3-window-wait').textContent.includes('请允许本次接管，再切回游戏')");
+        host.Fixture=null;host.FixtureRunning=null;
+        host.WindowState=WindowState.Minimized;
+        host.DispatchTrayAction(TrayAction.Open);
+        Assert(host.WindowState==WindowState.Normal&&host.IsVisible&&!host.Service.IsRunning,"tray open did not restore the idle assistant");
+        host.DispatchTrayAction(TrayAction.Settings);
+        await Until(host,"!!document.querySelector('.jx3-settings')");
+        Assert(!host.Service.IsRunning,"tray settings started the worker");
+        File.WriteAllText(Path.Combine(output,"client-menu-result.json"),JsonSerializer.Serialize(new{passed=true,scope="isolated WebView2 with demo worker only",actionsDispatched=0}));
+        return 0;
+    }
 }

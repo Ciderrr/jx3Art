@@ -35,4 +35,33 @@ html,body,#root{margin:0;width:100%;height:100%;overflow:hidden}body{background:
 html[data-skin-capture=true] .jx3-menu{visibility:hidden}
 .jx3-brand{display:flex;align-items:center;gap:12px}
 .jx3-brand img{display:block;flex:none}
+.jx3-brand-text{display:grid;line-height:1.12}
+.jx3-brand-text small{margin-top:4px;color:var(--muted);font:12px/1.2 var(--ui-font)}
 .jx3-icon-options{margin-top:24px;padding-top:16px;border-top:.5px solid var(--line)}.jx3-icon-options>div{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin:12px 0}.jx3-icon-options>div button{display:flex;align-items:center;gap:8px;background:var(--bg);color:var(--fg);border:1px solid var(--line);border-radius:6px;padding:8px;cursor:pointer}.jx3-icon-options button[aria-pressed=true]{border-color:var(--accent);box-shadow:inset 0 0 0 1px var(--accent)}.jx3-icon-options img{width:32px;height:32px}.jx3-icon-options .jx3-hint{font-size:12px}
+.jx3-client-selection{position:relative}
+.jx3-client-label-stack{display:grid;overflow:hidden}
+.jx3-client-label-stack>span{grid-area:1/1;pointer-events:none}
+.jx3-client-label-reserve{visibility:hidden}
+.jx3-takeover-hint{display:grid;grid-template-columns:24px minmax(0,1fr);gap:8px;align-items:start}
+.jx3-takeover-icon{display:grid;place-items:center;width:24px;height:24px;border-radius:6px;background:var(--surface);color:var(--muted)}
+.jx3-takeover-hint[data-automatic=true] .jx3-takeover-icon{color:#875015;background:#f7e9cd}
+.dark-theme .jx3-takeover-hint[data-automatic=true] .jx3-takeover-icon{color:#e7ba78;background:#413221}
+.jx3-plan-continuous{font-size:24px}
+.jx3-window-wait{display:grid;grid-template-columns:20px minmax(0,1fr);gap:8px;align-items:start;color:var(--muted);font-size:12px;line-height:1.45}
+.jx3-window-wait>span:first-child{display:grid;place-items:center;height:20px;color:#875015}
+.dark-theme .jx3-window-wait>span:first-child{color:#e7ba78}
+.jx3-header-button[data-state="open"] .jx3-client-lock{transform:none}
+html[data-client-capture=true] .jx3-menu{visibility:hidden}
+html[data-client-transition=running]::view-transition-group(root){animation:none}
+html[data-client-transition=running]::view-transition-old(root){animation:none;opacity:0}
+html[data-client-transition=running]::view-transition-new(root){animation:none}
+html[data-client-transition=running]::view-transition-group(artist-surface){animation-duration:850ms}
+html[data-client-transition=running]::view-transition-old(artist-surface){
+ animation:client-surface-out 850ms ease-out both;
+}
+html[data-client-transition=running]::view-transition-new(artist-surface){
+ mask-image:none;
+ animation:client-surface-in 850ms cubic-bezier(.22,.61,.36,1) both;
+}
+@keyframes client-surface-out{to{filter:brightness(.92)}}
+@keyframes client-surface-in{from{clip-path:circle(0% at 0% 100%)}to{clip-path:circle(155% at 0% 100%)}}

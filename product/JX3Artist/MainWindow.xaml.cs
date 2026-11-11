@@ -204,7 +204,7 @@ public partial class MainWindow:Window
             rendered=view;StateTitle.Text=view.Phase switch{Phase.Watching=>"确认画面",Phase.ConfirmingEntry=>"确认入口",Phase.WaitingVisibility=>"等待界面",Phase.WaitingIdle=>"等待接管",Phase.Starting=>"接管操作中",Phase.Performing=>"表演观察中",Phase.Paused=>"已暂停",Phase.Completed=>"已完成",_=>"已停止"};
             StateBadge.Visibility=Visibility.Collapsed;StateMessage.Visibility=view.Phase==Phase.Paused?Visibility.Visible:Visibility.Collapsed;
             StateMessage.Text=view.Message.Length>220?view.Message[..220]+"…":view.Message;
-            if(view.Phase==Phase.Paused)StateMessage.Text+="\n问题代码："+ProblemCatalog.Identify(view.Message).Code;
+            if(view.Phase==Phase.Paused)StateMessage.Text=ProblemCatalog.PauseMessage(StateMessage.Text,hotkeys?.Registered(AssistantHotkeys.StartId)==true?preferences.startHotkey:null);
             DiagnosticNote.Text=view.Message+(view.Detail==null?"":Environment.NewLine+view.Detail);
             StateBadge.Background=Brushes.Transparent;
             if(view.Preview!=null)

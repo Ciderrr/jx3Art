@@ -3,6 +3,9 @@ using System.IO;
 using System.Security.Cryptography;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Data;
+using System.Windows.Input;
+using System.Windows.Automation;
 using System.Windows.Media;
 using Microsoft.Web.WebView2.Core;
 using Windows.Media.Ocr;
@@ -15,11 +18,12 @@ internal sealed class DistributionWindow : Window
     static readonly Brush Ink = new SolidColorBrush(Color.FromRgb(39,37,34));
     static readonly Brush Bronze = new SolidColorBrush(Color.FromRgb(128,91,73));
     readonly WrapPanel actions = new() { Margin = new Thickness(0,20,0,0) };
+    readonly Style? updateButtons;
     internal TextBlock Status { get; } = new() { TextWrapping = TextWrapping.Wrap, FontSize = 16, Margin = new Thickness(0,18,0,6) };
     internal TextBlock Detail { get; } = new() { TextWrapping = TextWrapping.Wrap, FontSize = 13, Foreground = Brushes.DimGray, LineHeight = 22 };
     internal ProgressBar Progress { get; } = new() { Height = 5, Maximum = 100, Visibility = Visibility.Collapsed, Margin = new Thickness(0,14,0,0) };
 
-    internal DistributionWindow(string title, Window? owner = null)
+    internal DistributionWindow(string title, Window? owner = null, string? skin = null)
     {
         Title = title;
         Width = 540;
@@ -28,37 +32,118 @@ internal sealed class DistributionWindow : Window
         Background = Paper;
         Foreground = Ink;
         FontFamily = new FontFamily("Microsoft YaHei UI");
+        if(skin!=null)
+        {
+            UiTheme.Apply(this,skin);
+            WindowStyle=WindowStyle.None;
+            Background=Theme("Surface");Foreground=Theme("Ink");
+            FontFamily=new FontFamily("Segoe UI Variable Text, Segoe UI, Microsoft YaHei UI");
+            Width=520;
+            actions.HorizontalAlignment=HorizontalAlignment.Right;
+            updateButtons=UpdateButtonStyle();
+        }
         ShowInTaskbar = owner == null;
         if (owner != null) Owner = owner;
         WindowStartupLocation = owner == null ? WindowStartupLocation.CenterScreen : WindowStartupLocation.CenterOwner;
         var body = new StackPanel { Margin = new Thickness(28) };
-        var header = new StackPanel { Orientation = Orientation.Horizontal };
+        var header = new DockPanel();
         try
         {
             Icon = AppIcon.WindowSource();
-            const int size = 44;
-            var art = new Image { Width = size, Height = size, Margin = new Thickness(0,0,14,0) };
-            void Fit(DpiScale dpi) => art.Source = AppIcon.ImageSource((int)Math.Ceiling(size * Math.Max(dpi.DpiScaleX, dpi.DpiScaleY)));
-            Fit(VisualTreeHelper.GetDpi(this));
-            SourceInitialized += (_,_) => Fit(VisualTreeHelper.GetDpi(this));
-            DpiChanged += (_,e) => Fit(e.NewDpi);
-            RenderOptions.SetBitmapScalingMode(art, BitmapScalingMode.HighQuality);
-            header.Children.Add(art);
+            if(skin==null)
+            {
+                const int size = 44;
+                var art = new Image { Width = size, Height = size, Margin = new Thickness(0,0,14,0) };
+                void Fit(DpiScale dpi) => art.Source = AppIcon.ImageSource((int)Math.Ceiling(size * Math.Max(dpi.DpiScaleX, dpi.DpiScaleY)));
+                Fit(VisualTreeHelper.GetDpi(this));
+                SourceInitialized += (_,_) => Fit(VisualTreeHelper.GetDpi(this));
+                DpiChanged += (_,e) => Fit(e.NewDpi);
+                RenderOptions.SetBitmapScalingMode(art, BitmapScalingMode.HighQuality);
+                DockPanel.SetDock(art,Dock.Left);header.Children.Add(art);
+            }
         }
         catch (IOException) { }
-        header.Children.Add(new TextBlock { Text = title, FontSize = 23, FontWeight = FontWeights.SemiBold, VerticalAlignment = VerticalAlignment.Center });
+        var titles=new StackPanel{VerticalAlignment=VerticalAlignment.Center};
+        var heading=new TextBlock { Text = title, FontSize = skin==null?23:24, FontWeight = FontWeights.SemiBold };
+        if(skin!=null){heading.FontFamily=new FontFamily("SimSun, Microsoft YaHei UI");heading.FontWeight=FontWeights.Normal;}
+        titles.Children.Add(heading);
+        if(skin!=null)
+        {
+            titles.Children.Add(new TextBlock{Text="当前版本 v"+typeof(ReleaseUpdater).Assembly.GetName().Version!.ToString(3),
+                FontSize=13,Foreground=Theme("Muted"),Margin=new Thickness(0,4,0,0)});
+            titles.MouseLeftButtonDown+=(_,e)=>{if(e.LeftButton==MouseButtonState.Pressed)DragMove();};
+            var close=new Button{Content="×",Style=updateButtons,Width=36,Height=36,MinWidth=0,MinHeight=0,
+                FontSize=21,Foreground=Theme("Ink"),Background=Brushes.Transparent,BorderBrush=Brushes.Transparent,
+                BorderThickness=new Thickness(1),VerticalAlignment=VerticalAlignment.Top};
+            AutomationProperties.SetName(close,"关闭软件更新");
+            close.Click+=(_,_)=>Close();DockPanel.SetDock(close,Dock.Right);header.Children.Add(close);
+            PreviewKeyDown+=(_,e)=>{if(e.Key==Key.Escape){e.Handled=true;Close();}};
+        }
+        header.Children.Add(titles);
         body.Children.Add(header);
-        body.Children.Add(Status);
-        body.Children.Add(Detail);
-        body.Children.Add(Progress);
+        if(skin==null)
+        {
+            body.Children.Add(Status);body.Children.Add(Detail);body.Children.Add(Progress);
+        }
+        else
+        {
+            Status.Margin=new Thickness(0,22,0,5);Status.FontWeight=FontWeights.SemiBold;
+            Detail.FontSize=14;Detail.Foreground=Theme("Muted");
+            Progress.Foreground=Theme("AccentText");Progress.Background=Theme("Line");
+            body.Children.Add(Status);body.Children.Add(Detail);body.Children.Add(Progress);
+        }
         body.Children.Add(actions);
-        Content = body;
+        if(skin==null)Content=body;
+        else
+        {
+            body.Margin=new Thickness(0);
+            Content=new Border{Background=Background,Padding=new Thickness(28),BorderBrush=Theme("Line"),
+                BorderThickness=new Thickness(1),CornerRadius=new CornerRadius(12),Child=body};
+        }
+    }
+
+    Brush Theme(string name)=>(Brush)Resources[name];
+
+    Style UpdateButtonStyle()
+    {
+        var border=new FrameworkElementFactory(typeof(Border));
+        border.Name="Frame";
+        border.SetValue(Border.CornerRadiusProperty,new CornerRadius(7));
+        foreach(var property in new[]{Border.BackgroundProperty,Border.BorderBrushProperty,Border.BorderThicknessProperty,Border.PaddingProperty})
+            border.SetBinding(property,new Binding(property.Name){RelativeSource=new RelativeSource(RelativeSourceMode.TemplatedParent)});
+        var content=new FrameworkElementFactory(typeof(ContentPresenter));
+        content.SetValue(FrameworkElement.HorizontalAlignmentProperty,HorizontalAlignment.Center);
+        content.SetValue(FrameworkElement.VerticalAlignmentProperty,VerticalAlignment.Center);
+        content.SetValue(ContentPresenter.RecognizesAccessKeyProperty,true);
+        border.AppendChild(content);
+        var template=new ControlTemplate(typeof(Button)){VisualTree=border};
+        var style=new Style(typeof(Button));
+        style.Setters.Add(new Setter(TemplateProperty,template));
+        style.Setters.Add(new Setter(MinHeightProperty,36d));
+        style.Setters.Add(new Setter(MinWidthProperty,92d));
+        style.Setters.Add(new Setter(FocusVisualStyleProperty,null));
+        var hovered=new Trigger{Property=IsMouseOverProperty,Value=true};
+        hovered.Setters.Add(new Setter(Border.BorderBrushProperty,Theme("Accent"),"Frame"));template.Triggers.Add(hovered);
+        var focus=new Trigger{Property=IsKeyboardFocusedProperty,Value=true};
+        focus.Setters.Add(new Setter(Border.BorderBrushProperty,Theme("Accent"),"Frame"));template.Triggers.Add(focus);
+        var disabled=new Trigger{Property=IsEnabledProperty,Value=false};
+        disabled.Setters.Add(new Setter(OpacityProperty,.58));style.Triggers.Add(disabled);
+        return style;
     }
 
     internal Button Action(string label, Action onClick, bool primary = false)
     {
         var button = new Button { Content = label, FontSize = 13, Padding = new Thickness(15,9,15,9), Margin = new Thickness(0,0,8,6),
             Background = primary ? Bronze : Brushes.White, Foreground = primary ? Brushes.White : Ink };
+        if(updateButtons!=null)
+        {
+            button.Style=updateButtons;button.FontSize=14;button.Padding=new Thickness(13,6,13,6);
+            button.Margin=new Thickness(8,0,0,0);
+            button.Background=primary?Theme("AccentText"):Theme("Surface");
+            button.Foreground=primary?Theme("Paper"):Theme("Ink");
+            button.BorderBrush=primary?Theme("AccentText"):Theme("Line");
+            button.BorderThickness=new Thickness(1);
+        }
         button.Click += (_,_) => onClick();
         actions.Children.Add(button);
         return button;
@@ -180,17 +265,22 @@ internal static class StartupEnvironment
 
 internal static class UpdateDialog
 {
-    internal static UpdateLaunch? Show(Window owner, string dataRoot)
+    internal static DistributionWindow CreateWindow(Window? owner,string skin)
     {
-        var window = new DistributionWindow("软件更新", owner);
-        using var cancellation = new CancellationTokenSource();
-        var token = cancellation.Token;
-        window.Closed += (_,_) => cancellation.Cancel();
-        UpdateLaunch? result = null;
+        var window=new DistributionWindow("软件更新",owner,skin);
         window.Status.Text = "正在检查更新";
         window.Detail.Text = "查询项目的 GitHub 正式发行版。";
         window.Progress.Visibility = Visibility.Visible;
         window.Progress.IsIndeterminate = true;
+        return window;
+    }
+    internal static UpdateLaunch? Show(Window owner, string dataRoot,string skin)
+    {
+        var window=CreateWindow(owner,skin);
+        using var cancellation = new CancellationTokenSource();
+        var token = cancellation.Token;
+        window.Closed += (_,_) => cancellation.Cancel();
+        UpdateLaunch? result = null;
         var dismiss = window.Action("关闭", window.Close);
         window.Action("发布页", () => window.Open(ReleaseUpdater.Releases));
         window.Loaded += async (_,_) =>
@@ -219,14 +309,14 @@ internal static class UpdateDialog
                     }
                     catch (OperationCanceledException) when (cancellation.IsCancellationRequested) { result = null; }
                     catch (OperationCanceledException) { window.Status.Text = "下载超时";window.Detail.Text = "请重试，或在浏览器打开发布页下载。"; }
-                    catch (Exception ex) { window.Status.Text = "更新未完成";window.Detail.Text = ex.Message; }
+                    catch (Exception ex) { window.Status.Text = "更新未完成";window.Detail.Text = ProblemCatalog.UserMessage(ex.Message,"请重试，或在浏览器打开发布页下载。"); }
                     finally { download.IsEnabled = true;dismiss.Content = "关闭";window.Progress.Visibility = Visibility.Collapsed; }
                 }
                 download = window.Action("下载并更新", Download, true);
             }
             catch (OperationCanceledException) when (cancellation.IsCancellationRequested) { }
             catch (OperationCanceledException) { window.Status.Text = "检查更新超时";window.Detail.Text = "请重新打开更新窗口，或在浏览器打开发布页。"; }
-            catch (Exception ex) { window.Status.Text = "暂时无法检查更新";window.Detail.Text = ex.Message; }
+            catch (Exception ex) { window.Status.Text = "暂时无法检查更新";window.Detail.Text = ProblemCatalog.UserMessage(ex.Message,"请稍后重试，或在浏览器打开发布页查看。"); }
             finally { window.Progress.Visibility = Visibility.Collapsed; }
         };
         return window.ShowDialog() == true ? result : null;

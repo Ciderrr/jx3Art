@@ -5,7 +5,7 @@ internal record Box(int X,int Y,int X2,int Y2)
     internal int Width=>X2-X;internal int Height=>Y2-Y;
 }
 internal record Check(bool Identity,bool Foreground,bool HitTarget,bool Geometry,bool Cancelled,bool ButtonHeld,
-    string Privilege,string Location,int CandidateCount,int FrameWidth,int FrameHeight,double AgeMs,Box? Candidate,string D2,bool WindowFrame=false,double UiScale=1);
+    string Privilege,string Location,int CandidateCount,int FrameWidth,int FrameHeight,double AgeMs,Box? Candidate,string D2,bool WindowFrame=false,double UiScale=1,bool WujieWindow=false);
 internal static class ClickPolicy
 {
     internal const double MaxFrameAgeMs=3000;
@@ -20,7 +20,12 @@ internal static class ClickPolicy
         if(c.Location!="UNIQUE_CANDIDATE" || c.CandidateCount!=1)return "NO_UNIQUE_CURRENT_TARGET";
         if(c.Candidate is not {} b || b.X<0 || b.Y<0 || b.X2>c.FrameWidth || b.Y2>c.FrameHeight)return "INVALID_TARGET_BOX";
         bool exact=!c.WindowFrame||c.UiScale==1;
-        if(exact?(b.Width!=72||b.Height!=66):(!double.IsFinite(c.UiScale)||c.UiScale is <.35 or >2||b.Width<Math.Floor(72*c.UiScale)||b.Width>Math.Ceiling(72*c.UiScale)+1||b.Height<Math.Floor(66*c.UiScale)||b.Height>Math.Ceiling(66*c.UiScale)+1))return "INVALID_TARGET_BOX";
+        if(c.WujieWindow)
+        {
+            if(!c.WindowFrame||c.FrameWidth!=2564||c.FrameHeight!=1487)return "GEOMETRY_NOT_VERIFIED";
+            if(c.UiScale!=1||b.Width!=96||b.Height!=96)return "INVALID_TARGET_BOX";
+        }
+        else if(exact?(b.Width!=72||b.Height!=66):(!double.IsFinite(c.UiScale)||c.UiScale is <.35 or >2||b.Width<Math.Floor(72*c.UiScale)||b.Width>Math.Ceiling(72*c.UiScale)+1||b.Height<Math.Floor(66*c.UiScale)||b.Height>Math.Ceiling(66*c.UiScale)+1))return "INVALID_TARGET_BOX";
         if(c.D2=="VISIBLE")return "COUNTDOWN_ALREADY_VISIBLE";
         if(c.ButtonHeld)return "MOUSE_BUTTON_HELD";
         if(!c.HitTarget)return "TARGET_POINT_OCCLUDED";

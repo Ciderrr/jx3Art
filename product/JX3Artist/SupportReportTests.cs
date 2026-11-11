@@ -8,9 +8,9 @@ internal static class SupportReportTests
     {
         test("support report strips secrets raw errors OCR paths and arbitrary strings",()=>{
             var root=Path.Combine(Path.GetTempPath(),Guid.NewGuid().ToString("N"));Directory.CreateDirectory(Path.Combine(root,"logs"));
-            try{var data=new{Message="SECRET_ACCOUNT C:\\PRIVATE_PATH",error="SECRET_TOKEN",ImagePath="SECRET_SCREENSHOT",CountdownReason="SECRET_OCR",Location="SECRET_NAME",reasons=new[]{"WINDOW_MINIMIZED","SECRET_REASON"},D2="VISIBLE",Started=true,Metrics=new{RecognitionMs=123.0,RecognizerScheduling="SECRET_PID"}};
+            try{var data=new{Message="SECRET_ACCOUNT C:\\PRIVATE_PATH",error="SECRET_TOKEN",ImagePath="SECRET_SCREENSHOT",CountdownReason="SECRET_OCR",Location="SECRET_NAME",reasons=new[]{"WINDOW_MINIMIZED","SECRET_REASON"},Restoration=new{Reasons=new[]{"GAME_ACTIVATION_REFUSED","SECRET_REASON"}},D2="VISIBLE",Started=true,Metrics=new{RecognitionMs=123.0,RecognizerScheduling="SECRET_PID"}};
                 File.WriteAllText(Path.Combine(root,"logs/events.jsonl"),JsonSerializer.Serialize(new{utc="2026-11-02T00:00:00Z",kind="paused",data})+"\n{bad partial\n");
-                string preview=SupportReport.Preview(root,new(Phase.Paused,"SECRET_EXCEPTION"));if(preview.Contains("SECRET")||preview.Contains(root)||!preview.Contains("JX3-UNKNOWN-001")||!preview.Contains("RecognitionMs")||!preview.Contains("WINDOW_MINIMIZED"))throw new Exception("privacy projection");
+                string preview=SupportReport.Preview(root,new(Phase.Paused,"SECRET_EXCEPTION"));if(preview.Contains("SECRET")||preview.Contains(root)||!preview.Contains("JX3-UNKNOWN-001")||!preview.Contains("RecognitionMs")||!preview.Contains("WINDOW_MINIMIZED")||!preview.Contains("GAME_ACTIVATION_REFUSED"))throw new Exception("privacy projection");
                 using var doc=JsonDocument.Parse(preview);if(doc.RootElement.GetProperty("discarded").GetInt32()!=1)throw new Exception("partial log not diagnosed");
             }finally{Directory.Delete(root,true);}
         });

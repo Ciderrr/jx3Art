@@ -24,6 +24,7 @@ internal static class ProductTests
         CaptureDiagnosticTests.Add(Test);
         WindowGeometryTests.Add(Test);
         WindowFramePolicyTests.Add(Test);
+        WujieTrialTests.Add(Test,args);
         BitmapTransportTests.Add(Test);
         ExperienceEstimateTests.Add(Test);
         ExperienceSessionTests.Add(Test);
@@ -40,6 +41,7 @@ internal static class ProductTests
         EngineBundle.AddTests(Test);
         RecognizerWorkerTests.Add(Test);
         WindowsNotice.AddTests(Test);
+        TrayMenu.AddTests(Test);
         PreclickEvidence.AddTests(Test);
         TakeoverRetryBudget.AddTests(Test);
         EntryPixelProof.AddTests(Test);
@@ -142,10 +144,22 @@ internal static class ProductTests
         ActionEvidence Click(FakeDesktop d,Interaction lease){d.Pointer=new(2751,1503);d.Tick=200;lease.OwnInput(d.Pointer,d.Tick);return new(true,4000);}
         Test("foreground takeover restores original window and pointer",()=>{var d=new FakeDesktop();var r=FocusTransaction.Run(d,20,2,()=>false,l=>Click(d,l));Assert(r.Started && r.Restored && d.Current==10 && d.Pointer==new Pointer(40,50) && d.Calls.SequenceEqual(new[]{"activate:20","activate:10","move"}));});
         Test("busy user gets no window changes",()=>{var d=new FakeDesktop{IsIdle=false};int calls=0;var r=FocusTransaction.Run(d,20,2,()=>false,_=>{calls++;return new(true,4000);});Assert(r.Deferred && calls==0 && d.Calls.Count==0);});
+        Test("manual foreground recovery never requests activation",()=>
+        {
+            var desktop=new FakeDesktop();
+            int actions=0;
+            ActionEvidence Act(Interaction _){actions++;return new(true,1000);}
+            var waiting=FocusTransaction.Run(desktop,20,2,()=>false,Act,requireGameForeground:true);
+            Assert(waiting.Deferred&&waiting.Error==FocusTransaction.ForegroundRequired&&actions==0&&desktop.Calls.Count==0);
+            desktop.Current=20;
+            var resumed=FocusTransaction.Run(desktop,20,2,()=>false,Act,requireGameForeground:true);
+            Assert(resumed.Started&&actions==1&&!desktop.Calls.Any(call=>call.StartsWith("activate:")));
+        });
         Test("foreground refusal retries only after fresh entry evidence and within the same budget",()=>{
             var desktop=new FakeDesktop{AllowGame=false};var core=Ready();var budget=new TakeoverRetryBudget();budget.Begin(3500);int clicks=0;
             core.BeginAction();var refusal=FocusTransaction.Run(desktop,20,2,()=>false,l=>{clicks++;return Click(desktop,l);});
             Assert(refusal.Deferred&&refusal.Error==FocusTransaction.ActivationFailure&&clicks==0&&budget.Defer(4300));
+            Assert(!refusal.ControlTransferred && !refusal.Restored && refusal.Restoration!.Reasons.SequenceEqual(new[]{"GAME_ACTIVATION_REFUSED"}));
             core.ActionDeferred("重新确认");core.Observe(Entry(5000));Assert(!core.WantsStart);core.Observe(Entry(6000));Assert(core.WantsStart&&budget.CanResume(6000));
             desktop.AllowGame=true;core.BeginAction();var success=FocusTransaction.Run(desktop,20,2,()=>false,l=>{clicks++;return Click(desktop,l);});Assert(success.Started&&success.Restored&&clicks==1);
         });

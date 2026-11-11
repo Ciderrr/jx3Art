@@ -1,7 +1,7 @@
 namespace JX3Artist;
 
 // Only schedules observations. This type has no authority to request game input.
-internal sealed class CountdownTracker
+internal sealed class CountdownTracker(bool retainOnNumericMiss=false)
 {
     const double ToleranceMs=3000;
     double lastSource=double.NegativeInfinity;double? pendingEnd,previousEnd;
@@ -23,17 +23,31 @@ internal sealed class CountdownTracker
     }
     internal double? EndSourceMs{get;private set;}
     internal int Reanchors{get;private set;}
+    internal bool Estimated{get;private set;}
     internal string Status{get;private set;}="剩余时间未知";
     internal void Clear()
-    {EndSourceMs=pendingEnd=previousEnd=phaseLow=phaseHigh=null;observedZero=false;lastSource=double.NegativeInfinity;misses=0;acquireUntil=double.NegativeInfinity;Status="等待新一轮倒计时";}
+    {EndSourceMs=pendingEnd=previousEnd=phaseLow=phaseHigh=null;observedZero=Estimated=false;lastSource=double.NegativeInfinity;misses=0;acquireUntil=double.NegativeInfinity;Status="等待新一轮倒计时";}
     internal void Unavailable()
-    {EndSourceMs=pendingEnd=phaseLow=phaseHigh=null;observedZero=false;misses++;Status="未确认，等待新画面";}
+    {EndSourceMs=pendingEnd=phaseLow=phaseHigh=null;observedZero=Estimated=false;misses++;Status="未确认，等待新画面";}
     internal void Observe(int? seconds,string quality,double source)
     {
         if(!double.IsFinite(source) || source<=lastSource){Unavailable();return;}
         lastSource=source;
-        if(quality!="DUAL_PASS_AGREEMENT" || seconds is null or <0 or >5999){Unavailable();return;}
-        misses=0;observedZero=seconds.Value==0;double candidate=source+seconds.Value*1000d;
+        if(quality!="DUAL_PASS_AGREEMENT" || seconds is null or <0 or >5999)
+        {
+            if(retainOnNumericMiss&&!observedZero&&DisplayDeadline is double end&&source<end)
+            {
+                misses++;pendingEnd=null;Estimated=true;Status="根据上次读数继续计时";
+            }
+            else
+            {
+                bool expired=retainOnNumericMiss&&DisplayDeadline.HasValue;
+                Unavailable();
+                if(expired)BeginAcquisition(source);
+            }
+            return;
+        }
+        misses=0;Estimated=false;observedZero=seconds.Value==0;double candidate=source+seconds.Value*1000d;
         if(EndSourceMs.HasValue && Math.Abs(candidate-EndSourceMs.Value)<=ToleranceMs)
         {Phase(candidate,true);EndSourceMs=previousEnd=candidate;acquireUntil=double.NegativeInfinity;Status="倒计时已确认";return;}
         // A jump invalidates the previous prediction immediately; confirm with another fresh frame.
@@ -50,10 +64,12 @@ internal sealed class CountdownTracker
     internal int DelayMs(double now)
     {
         if(!double.IsFinite(now))return 1000;
-        if(!EndSourceMs.HasValue)return now<acquireUntil||pendingEnd.HasValue?1000:Math.Min(30000,5000*Math.Max(1,Math.Min(misses,6)));
+        int maxWait=retainOnNumericMiss?15000:30000;
+        if(!EndSourceMs.HasValue)return now<acquireUntil||pendingEnd.HasValue?1000:Math.Min(maxWait,5000*Math.Max(1,Math.Min(misses,6)));
         double remaining=EndSourceMs.Value-now;
-        if(remaining>300000)return (int)Math.Clamp(remaining-300000,1000,120000);
-        if(remaining>60000)return (int)Math.Clamp(remaining-60000,1000,30000);
+        if(Estimated)maxWait=Math.Min(maxWait,5000*Math.Max(1,Math.Min(misses,3)));
+        if(remaining>300000)return (int)Math.Clamp(remaining-300000,1000,retainOnNumericMiss?maxWait:120000);
+        if(remaining>60000)return (int)Math.Clamp(remaining-60000,1000,maxWait);
         if(remaining>10000)return (int)Math.Clamp(remaining-10000,1000,5000);
         return 1000;
     }

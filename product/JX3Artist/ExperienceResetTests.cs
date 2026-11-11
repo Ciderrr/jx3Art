@@ -39,9 +39,12 @@ internal static class ExperienceResetTests
             using var reopened=new ExperienceSession(root,clock:()=>400000);Check(reopened.LifetimeGain==6&&!reopened.LifetimePartial);
         }));
         test("visibility guidance distinguishes unconfirmed entry context from absent evidence without hiding stale geometry",()=>{
-            string partial=StatusSummary.VisibilityHint(new(Phase.WaitingVisibility,"已找到入口，但入口周围控件尚未确认；等待界面恢复，继续观察，不会点击"));Check(partial.Contains("完整")&&!partial.Contains("金色")&&partial.Contains("不会据此点击"));
-            string absent=StatusSummary.VisibilityHint(new(Phase.WaitingVisibility,"画面证据不足"));Check(absent.Contains("遮挡")&&absent.Contains("是否已开启")&&!absent.Contains("已确认被遮挡"));
-            string stale="游戏窗口坐标已变化，等待新画面重新定位；不会点击";Check(StatusSummary.VisibilityHint(new(Phase.WaitingVisibility,stale))==stale);
+            string partial=StatusSummary.VisibilityHint(new(Phase.WaitingVisibility,"已找到入口，但入口周围控件尚未确认；等待界面恢复，继续观察，不会点击",NextCheck:5200),1000);
+            Check(partial.Contains("完整")&&!partial.Contains("金色")&&partial.Contains("助手会在 5 秒之后再次自动检查。"));
+            string absent=StatusSummary.VisibilityHint(new(Phase.WaitingVisibility,"画面证据不足"),1000);
+            Check(absent.Contains("遮挡")&&absent.Contains("是否已开启")&&!absent.Contains("已确认被遮挡")&&absent.Contains("助手正在自动检查。"));
+            string stale="游戏窗口坐标已变化，等待新画面重新定位；不会点击";
+            Check(StatusSummary.VisibilityHint(new(Phase.WaitingVisibility,stale,NextCheck:900),1000).Contains("坐标已变化，等待新画面重新定位。\n助手正在自动检查。"));
         });
     }
 }

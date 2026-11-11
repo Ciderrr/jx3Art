@@ -1,15 +1,18 @@
 namespace JX3Artist;
 
 internal enum Phase { Watching, ConfirmingEntry, WaitingVisibility, WaitingIdle, Starting, Performing, Paused, Stopped, Completed }
-internal record Observation(double Source,double Now,bool Identity,bool Geometry,string Location,int Count,string D2,string? ImagePath=null,bool EntryContextConfirmed=false,int? CountdownSeconds=null,string CountdownQuality="UNKNOWN",string CountdownReason="not_read",bool PanelLocated=false,int PanelDx=0,int PanelDy=0,string PanelLocation="NOT_CHECKED");
+internal record Observation(double Source,double Now,bool Identity,bool Geometry,string Location,int Count,string D2,string? ImagePath=null,bool EntryContextConfirmed=false,int? CountdownSeconds=null,string CountdownQuality="UNKNOWN",string CountdownReason="not_read",bool PanelLocated=false,int PanelDx=0,int PanelDy=0,string PanelLocation="NOT_CHECKED",bool StopButtonVisible=false)
+{
+    internal bool PerformanceVisible=>Location=="NO_VERIFIED_CANDIDATE"&&Count==0&&(D2=="VISIBLE"||StopButtonVisible);
+}
 internal static class EntryReadiness
 {
     // PO 2026-11-07: the unique visible performer icon is sufficient positive
     // entry evidence. Gold ornament is diagnostic only. Panel conflicts still deny.
-    internal static bool Confirmed(Observation o)=>o.Location=="UNIQUE_CANDIDATE" && o.Count==1 && o.PanelLocation is not ("AMBIGUOUS" or "SEARCH_LIMIT" or "UNRESOLVED_PANEL_CANDIDATE" or "SCALE_CONFLICT") &&
+    internal static bool Confirmed(Observation o)=>o.Location=="UNIQUE_CANDIDATE" && o.Count==1 && !o.StopButtonVisible && o.PanelLocation is not ("AMBIGUOUS" or "SEARCH_LIMIT" or "UNRESOLVED_PANEL_CANDIDATE" or "SCALE_CONFLICT") &&
         (o.D2=="NOT_VISIBLE" || o.D2=="UNKNOWN" && !o.PanelLocated && o.PanelLocation!="UNIQUE_PANEL");
 }
-internal sealed class AutomationController(int maxStarts,double epoch)
+internal sealed class AutomationController(int maxStarts,double epoch,bool retainCountdownOnNumericMiss=false)
 {
     internal Phase State{get;private set;}=Phase.Watching;
     internal string Message{get;private set;}="正在确认游戏画面";
@@ -18,7 +21,7 @@ internal sealed class AutomationController(int maxStarts,double epoch)
     internal bool WantsStart{get;private set;}
     internal double? PerformingSince{get;private set;}
     internal bool Done=>State is Phase.Paused or Phase.Stopped or Phase.Completed;
-    internal CountdownTracker Countdown{get;}=new();
+    internal CountdownTracker Countdown{get;}=new(retainCountdownOnNumericMiss);
     double lastSource=epoch;int entry,panel;bool hasPanel,knownStart,actionPending;
     internal int NextObservationDelayMs(double now)=>!Done&&State!=Phase.Starting&&Countdown.Acquiring(now)?1000:State switch
     {
@@ -39,14 +42,15 @@ internal sealed class AutomationController(int maxStarts,double epoch)
         {Uncertain("画面过期或未更新");return;}
         lastSource=o.Source;
         bool isEntry=EntryReadiness.Confirmed(o);
-        bool isPanel=o.Location=="NO_VERIFIED_CANDIDATE" && o.Count==0 && o.D2=="VISIBLE";
+        bool isPanel=o.PerformanceVisible;
         if(!isEntry && !isPanel){Uncertain(o.Location=="UNIQUE_CANDIDATE" && o.Count==1 && o.D2=="UNKNOWN"?"入口与表演界面证据冲突，等待新画面确认":"画面证据不足，请保持入口/表演界面可见");return;}
         if(isPanel)
         {
-            Countdown.Observe(o.CountdownSeconds,o.CountdownQuality,o.Source);
+            if(o.StopButtonVisible)Countdown.Observe(null,"UNKNOWN",o.Source);
+            else Countdown.Observe(o.CountdownSeconds,o.CountdownQuality,o.Source);
             entry=0;panel++;WantsStart=false;
             if(panel>=2)
-            {if(!hasPanel){PerformingSince=o.Now;knownStart=false;Countdown.BeginAcquisition(o.Now);}hasPanel=true;State=Phase.Performing;Message=knownStart?"检测到表演面板，正在后台观察，不发送输入":"已接管正在进行的表演：只观察，自然结束后再续演，不重复点击";}
+            {if(!hasPanel){PerformingSince=o.Now;knownStart=false;if(!o.StopButtonVisible)Countdown.BeginAcquisition(o.Now);}hasPanel=true;State=Phase.Performing;Message=o.StopButtonVisible?"检测到结束表演按钮，正在观察表演":knownStart?"检测到表演面板，正在后台观察，不发送输入":"已接管正在进行的表演：只观察，自然结束后再续演，不重复点击";}
             return;
         }
         Countdown.Unavailable();panel=0;entry++;if(entry<2){State=Phase.ConfirmingEntry;Message="检测到入口，等待第二张新画面确认";return;}

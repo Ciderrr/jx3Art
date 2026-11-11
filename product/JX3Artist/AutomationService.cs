@@ -4,8 +4,8 @@ using Jx3.OneClickTest;
 using InputNative=Jx3.OneClickTest.Native;
 namespace JX3Artist;
 
-internal sealed record ViewState(Phase Phase,string Message,int Starts=0,int Returns=0,string? Preview=null,DateTime? FrameTime=null,double? FrameAgeMs=null,string? Detail=null,double? CountdownEnd=null,string? CountdownStatus=null,double? NextCheck=null,bool AwaitingApproval=false,double? DisplayDeadline=null,double? DisplayUncertaintyMs=null);
-internal sealed class AutomationService(string dataRoot,string engineRoot,bool demo=false,ExperienceSession? experience=null)
+internal sealed record ViewState(Phase Phase,string Message,int Starts=0,int Returns=0,string? Preview=null,DateTime? FrameTime=null,double? FrameAgeMs=null,string? Detail=null,double? CountdownEnd=null,string? CountdownStatus=null,double? NextCheck=null,bool AwaitingApproval=false,double? DisplayDeadline=null,double? DisplayUncertaintyMs=null,bool CountdownEstimated=false,bool GameMinimized=false,double? MinimizedDeadline=null,bool ForegroundRecovery=false,bool ForegroundRechecking=false);
+internal sealed class AutomationService(string dataRoot,string engineRoot,bool demo=false,ExperienceSession? experience=null,string? wujieTemplates=null)
 {
     internal SupportHistory History{get;}=new(dataRoot);
     internal nint AssistantWindow{get;set;}
@@ -18,11 +18,15 @@ internal sealed class AutomationService(string dataRoot,string engineRoot,bool d
     internal bool IsRunning=>worker?.IsAlive==true;
     internal bool IsStopping=>cancellation?.IsCancellationRequested==true;
     internal bool ButtonPending=>Volatile.Read(ref buttonPending)!=0;
+    internal static bool CanObserveDuringForegroundRecovery(Observation observation,double? foregroundAfter)=>
+        !observation.Identity||observation.PerformanceVisible||(foregroundAfter.HasValue&&observation.Source>foregroundAfter.Value);
     internal void Publish(ViewState value){if(value.Phase==Phase.Paused&&Latest.Phase!=Phase.Paused)History.Record("problem_detected",new{state=value.Phase.ToString(),value.Starts,value.Returns},ProblemCatalog.Identify(value.Message).Code);Notices.Observe(value,Mode.Enabled);Volatile.Write(ref latest,value);}
     internal void ApproveTakeover(){bool accepted=Volatile.Read(ref approvalRequested)==1;History.Record("approval_requested",new{accepted});if(accepted){Interlocked.Exchange(ref approval,1);Mode.Changed.Set();}}
-    internal bool Start(int maxStarts,bool unattended=false,string origin="button")
+    internal bool Start(int maxStarts,bool unattended=false,string origin="button",bool useWujie=false)
     {
         if(IsRunning){History.Record("start_requested",new{maxStarts,unattended,origin,accepted=false});return false;}
+        if(useWujie&&wujieTemplates==null)throw new InvalidOperationException("当前包没有极速端试用配置。");
+        string? templates=useWujie?wujieTemplates:null;
         experience?.Suspend();
         Mode.Set(unattended);
         if(ButtonPending){if(InputNative.ButtonHeld){History.Record("start_requested",new{maxStarts,unattended,origin,accepted=false});Publish(new(Phase.Paused,"请先人工松开鼠标，再重新开始"));return false;}Interlocked.Exchange(ref buttonPending,0);}
@@ -30,7 +34,7 @@ internal sealed class AutomationService(string dataRoot,string engineRoot,bool d
         Interlocked.Exchange(ref approvalRequested,0);Interlocked.Exchange(ref approval,0);
         cancellation?.Dispose();cancellation=new();var token=cancellation.Token;
         Notices.Begin();Publish(new(Phase.Watching,demo?"演示模式：不读取或操作游戏":"正在连接客户端…"));
-        worker=new Thread(()=>Work(maxStarts,unattended,token)){IsBackground=true,Name="JX3Artist-session"};worker.SetApartmentState(ApartmentState.STA);worker.Start();return true;
+        worker=new Thread(()=>Work(maxStarts,unattended,templates,token)){IsBackground=true,Name="JX3Artist-session"};worker.SetApartmentState(ApartmentState.STA);worker.Start();return true;
     }
     internal void Stop(string origin="button")
     {
@@ -39,12 +43,15 @@ internal sealed class AutomationService(string dataRoot,string engineRoot,bool d
         cancellation?.Cancel();
         Publish(IsRunning?Latest with{Message="正在停止后续操作，等待释放输入/资源…"}:Latest with{Phase=Phase.Stopped,Message="已停止后续操作，不会打断游戏中的表演"});
     }
-    void Work(int maxStarts,bool unattended,CancellationToken token)
+    void Work(int maxStarts,bool unattended,string? templates,CancellationToken token)
     {
-        var core=new AutomationController(maxStarts,FrameTiming.NowMs());string? image=null;DateTime? frameTime=null;double? age=null,nextCheck=null;
+        var core=new AutomationController(maxStarts,FrameTiming.NowMs(),retainCountdownOnNumericMiss:templates!=null);string? image=null;DateTime? frameTime=null;double? age=null,nextCheck=null;
+        bool gameMinimized=false,foregroundRecovery=false;
+        double? minimizedDeadline=null,foregroundRecoveryAfter=null;
         using var journal=new Journal(Path.Combine(dataRoot,"logs"),error=>Publish(Latest with{Phase=Phase.Paused,Message="后续操作已停止，但日志关闭失败",Detail=error}),(kind,data)=>History.Record(kind,data));
         var trace=new SessionTrace(journal);
-        void Push(string? detail=null)=>Publish(new(core.State,core.Message,core.Starts,core.Returns,image,frameTime,age,detail,core.Countdown.EndSourceMs,core.Countdown.Status,nextCheck,Volatile.Read(ref approvalRequested)==1,core.Countdown.DisplayDeadline,core.Countdown.DisplayUncertaintyMs));
+        void Push(string? detail=null)=>Publish(new(core.State,core.Message,core.Starts,core.Returns,image,frameTime,age,detail,core.Countdown.EndSourceMs,core.Countdown.Status,nextCheck,Volatile.Read(ref approvalRequested)==1,core.Countdown.DisplayDeadline,core.Countdown.DisplayUncertaintyMs,core.Countdown.Estimated,
+            !core.Done&&gameMinimized,core.Done?null:minimizedDeadline,!core.Done&&foregroundRecovery,foregroundRecoveryAfter.HasValue));
         try
         {
             if(demo)
@@ -53,9 +60,21 @@ internal sealed class AutomationService(string dataRoot,string engineRoot,bool d
                 Publish(new(Phase.Completed,"演示已结束，没有读取或操作游戏",1));return;
             }
             var self=InputPreflight.Read((uint)Environment.ProcessId);if(self.Elevated!=true)throw new InvalidOperationException("需要管理员权限。请正常双击 JX3Artist.exe 启动并由你处理系统授权。");
-            using var session=new GameSession(engineRoot,Path.Combine(dataRoot,"cache"));var desktop=new Desktop(session.Pid);
+            using var session=new GameSession(engineRoot,Path.Combine(dataRoot,"cache"),templates);var desktop=new Desktop(session.Pid);
             trace.Begin(new{version=typeof(AutomationService).Assembly.GetName().Version?.ToString(),maxStarts,unattended,mode="temporary foreground takeover; NOT true background input",pid=session.Pid,window=session.Window.ToInt64()});
             var takeover=new TakeoverPolicy(()=>Mode.Enabled);var retryBudget=new TakeoverRetryBudget();bool automaticGrant=false;Func<bool>? focusRetryPermit=null;var preparationForeground=new PreparationForeground();bool entryDiagnosticWritten=false;int localFailures=0;int failures=0,reanchors=0,previousDelay=0;Phase previous=core.State;string previousTimerStatus="",previousTimerReason="";double lastTimerDiagnostic=double.NegativeInfinity;
+            void WaitForGameForeground(bool actionPending)
+            {
+                if(!foregroundRecovery)
+                {
+                    journal.Write("waiting_game_foreground",new{core.Starts,core.Returns});
+                    focusRetryPermit=null;retryBudget.Clear();automaticGrant=false;
+                    Interlocked.Exchange(ref approvalRequested,0);Interlocked.Exchange(ref approval,0);
+                }
+                foregroundRecovery=true;foregroundRecoveryAfter=null;
+                if(actionPending)core.ActionDeferred(FocusTransaction.ForegroundRequired);
+                else core.ObservationUnavailable(FocusTransaction.ForegroundRequired);
+            }
             ForegroundPreparationResult RestoreAssistant(string reason,bool authorized)
             {
                 if(RestorePreparationForeground==null||AssistantWindow==0)return new(false,false,"assistant_window_unavailable",0);
@@ -76,25 +95,73 @@ internal sealed class AutomationService(string dataRoot,string engineRoot,bool d
                     return false;
                 }
                 if(retryBudget.CanResume(FrameTiming.NowMs()))return false;
+                if(session.IsWujie){WaitForGameForeground(false);return false;}
                 core.Pause(FocusTransaction.ActivationFailure);
                 nextCheck=null;
                 Push();
                 return true;
             }
-            RestoreAssistant("explicit_start",true);
+            if(desktop.Foreground!=session.Window)RestoreAssistant("explicit_start",true);
+            bool waitingForRestore=false;
             while(!token.IsCancellationRequested && !core.Done)
             {
                 if(FinishExpiredFocusRetry())break;
                 if(automaticGrant&&!Mode.Enabled){retryBudget.Clear();automaticGrant=false;}
                 double cycleStarted=FrameTiming.NowMs();Picture picture;
-                try{picture=session.Capture(token);failures=0;}
+                if(foregroundRecovery)
+                {
+                    if(desktop.Foreground!=session.Window)
+                    {
+                        if(foregroundRecoveryAfter.HasValue)WaitForGameForeground(false);
+                    }
+                    else if(!foregroundRecoveryAfter.HasValue)
+                    {
+                        foregroundRecoveryAfter=cycleStarted;
+                        core.ObservationUnavailable("已切回游戏，正在重新确认画面");
+                    }
+                }
+                try
+                {
+                    double freshAfter=waitingForRestore?cycleStarted:foregroundRecoveryAfter??double.NegativeInfinity;
+                    picture=session.Capture(token,freshAfter);
+                    gameMinimized=false;minimizedDeadline=null;
+                    if(waitingForRestore)
+                    {
+                        if(!(picture.Observation.Source>cycleStarted))
+                        {
+                            nextCheck=FrameTiming.NowMs()+1000;Push();
+                            if(token.WaitHandle.WaitOne(1000))throw new OperationCanceledException();
+                            continue;
+                        }
+                        journal.Write("window_restored",new{source=picture.Observation.Source});
+                        waitingForRestore=false;
+                    }
+                    failures=0;
+                }
                 catch(OperationCanceledException){throw;}
                 catch(Exception ex)
                 {
                     Interlocked.Exchange(ref approvalRequested,0);Interlocked.Exchange(ref approval,0);
-                    failures++;journal.Write("capture_failed",new{error=ex.Message,failures,phase="watching",exceptionType=ex.GetType().Name,
-                        reasons=(ex as CaptureFailureException)?.Reasons,evidence=(ex as CaptureFailureException)?.Evidence});
-                    if(!session.Identity || failures>=3){core.Pause(ex.Message);nextCheck=null;Push();break;}
+                    bool identity=session.Identity;
+                    bool minimized=CaptureDiagnostics.WaitForRestore(session.IsWujie,identity,ex);
+                    failures=minimized?0:failures+1;
+                    if(!minimized||!waitingForRestore)
+                        journal.Write("capture_failed",new{error=ex.Message,failures,phase="watching",exceptionType=ex.GetType().Name,
+                            reasons=(ex as CaptureFailureException)?.Reasons,evidence=(ex as CaptureFailureException)?.Evidence});
+                    if(minimized)
+                    {
+                        if(!gameMinimized)
+                        {
+                            minimizedDeadline=core.Countdown.DisplayDeadline;
+                            experience?.Suspend();core.ObservationUnavailable(WujieTarget.CaptureWindowMinimized);
+                        }
+                        gameMinimized=true;foregroundRecoveryAfter=null;
+                        waitingForRestore=true;nextCheck=FrameTiming.NowMs()+2000;Push();
+                        if(token.WaitHandle.WaitOne(2000))throw new OperationCanceledException();
+                        continue;
+                    }
+                    gameMinimized=false;minimizedDeadline=null;
+                    if(!identity || failures>=3){core.Pause(ex.Message);nextCheck=null;Push();break;}
                     experience?.Suspend();core.ObservationUnavailable("取帧暂时失败");nextCheck=FrameTiming.NowMs()+2000;Push(ex.Message);
                     if(token.WaitHandle.WaitOne(2000))throw new OperationCanceledException();continue;
                 }
@@ -104,16 +171,20 @@ internal sealed class AutomationService(string dataRoot,string engineRoot,bool d
                 if(FinishExpiredFocusRetry())break;
                 if(automaticGrant&&!Mode.Enabled){retryBudget.Clear();automaticGrant=false;}
                 bool authorizedPreparation=retryBudget.CanResume(FrameTiming.NowMs())||takeover.CanProceed(Volatile.Read(ref approval)==1);
-                if(authorizedPreparation && PreparationForeground.SlowEntry(picture.Observation))
+                if(!foregroundRecovery && authorizedPreparation && PreparationForeground.SlowEntry(picture.Observation))
                 {
                     var restored=RestoreAssistant("slow_background_entry",true);
                     if(restored.Activated&&restored.Requested){core.ObservationUnavailable("助手已自动恢复前台，正在重新确认本次已授权接管");nextCheck=FrameTiming.NowMs()+50;Push();if(token.WaitHandle.WaitOne(50))throw new OperationCanceledException();continue;}
                 }
                 if(automaticGrant&&!Mode.Enabled){retryBudget.Clear();automaticGrant=false;}
                 if(Interlocked.Exchange(ref approval,0)==1){retryBudget.Grant(FrameTiming.NowMs());automaticGrant=false;Interlocked.Exchange(ref approvalRequested,0);}
-                image=picture.Path;frameTime=DateTime.Now;age=picture.Observation.Now-picture.Observation.Source;core.Observe(picture.Observation);
+                image=picture.Path;frameTime=DateTime.Now;age=picture.Observation.Now-picture.Observation.Source;
+                if(foregroundRecovery&&desktop.Foreground!=session.Window&&foregroundRecoveryAfter.HasValue)WaitForGameForeground(false);
+                if(foregroundRecovery&&!CanObserveDuringForegroundRecovery(picture.Observation,foregroundRecoveryAfter))
+                    core.ObservationUnavailable(FocusTransaction.ForegroundRequired);
+                else core.Observe(picture.Observation);
                 experience?.Observe(picture.Observation,core.State,core.Returns,core.Countdown.Reanchors,core.NextObservationDelayMs(picture.Observation.Now));
-                if(core.State==Phase.Performing){takeover.ExistingPerformanceObserved();focusRetryPermit=null;retryBudget.Clear();localFailures=0;preparationForeground.Clear();}nextCheck=null;Push();
+                if(core.State==Phase.Performing){foregroundRecovery=false;foregroundRecoveryAfter=null;takeover.ExistingPerformanceObserved();focusRetryPermit=null;retryBudget.Clear();localFailures=0;preparationForeground.Clear();}nextCheck=null;Push();
                 if(session.EntryEvidencePath!=null || session.EntryEvidenceError!=null){if(!entryDiagnosticWritten){journal.Write("entry_rejection_evidence",new{session.EntryEvidencePath,session.EntryEvidenceError});entryDiagnosticWritten=true;}}
                 if(previous!=core.State){journal.Write("state",new{state=core.State.ToString(),core.Message,core.Starts,core.Returns,picture.Observation.Location,picture.Observation.Count,picture.Observation.D2,picture.Observation.EntryContextConfirmed,picture.Observation.CountdownSeconds,picture.Observation.CountdownQuality,sourceAgeMs=age});previous=core.State;}
                 if(reanchors!=core.Countdown.Reanchors){reanchors=core.Countdown.Reanchors;journal.Write("countdown_reanchored",new{reanchors,core.Countdown.Status,core.Countdown.EndSourceMs});}
@@ -134,7 +205,7 @@ internal sealed class AutomationService(string dataRoot,string engineRoot,bool d
                         var permitted=focusRetryPermit??Mode.Permit(!automaticTransaction);
                         if(!permitted()){focusRetryPermit=null;retryBudget.Clear();automaticGrant=false;core.ObservationUnavailable("已取消自动接管，等待确认");Push();continue;}
                         desktop.SkipIdleWait=true;
-                        if(desktop.Foreground!=session.Window)RestoreAssistant("authorized_takeover_preparation",true);
+                        if(!foregroundRecovery&&desktop.Foreground!=session.Window)RestoreAssistant("authorized_takeover_preparation",true);
                         bool compatibility=PreparedEntryPolicy.Compatibility(localFailures,picture.EntryProof!=null);
                         if(!desktop.Idle){core.Deferred("请松开鼠标和修饰键，随后继续接管");Push();}
                         else if(!PreparedEntryPolicy.ReadyForRoute(picture.Observation,picture.Icon!=null,compatibility,FrameTiming.NowMs()))
@@ -154,9 +225,11 @@ internal sealed class AutomationService(string dataRoot,string engineRoot,bool d
                             journal.Write("takeover_intent",new{target=session.Window.ToInt64(),pid=session.Pid,unattended=Mode.Enabled,automaticTransaction});
                             Interaction? activeLease=null;
                             var startupSamples=new List<Observation>(3);double inputCompleted=double.NaN;
-                            var result=FocusTransaction.Run(desktop,session.Window,session.Pid,()=>token.IsCancellationRequested||activeLease?.InputAttempted!=true&&!permitted(),lease=>{activeLease=lease;return StartOnce(session,desktop,lease,token,journal,picture,compatibility,permitted,(sample,completed)=>{startupSamples.Add(sample);inputCompleted=completed;});},authorizedMotion:true);
+                            var result=FocusTransaction.Run(desktop,session.Window,session.Pid,()=>token.IsCancellationRequested||activeLease?.InputAttempted!=true&&!permitted(),lease=>{activeLease=lease;return StartOnce(session,desktop,lease,token,journal,picture,compatibility,permitted,(sample,completed)=>{startupSamples.Add(sample);inputCompleted=completed;});},authorizedMotion:true,requireGameForeground:foregroundRecovery);
                             journal.Write("takeover_result",result);
                             if(!permitted()&&activeLease?.InputAttempted!=true){focusRetryPermit=null;retryBudget.Clear();automaticGrant=false;core.ActionDeferred("已取消自动接管，等待确认");}
+                            else if(foregroundRecovery&&result.Deferred&&(result.Error==FocusTransaction.ForegroundRequired||desktop.Foreground!=session.Window)&&activeLease?.InputAttempted!=true)
+                                WaitForGameForeground(true);
                             else if(result.Deferred && retryBudget.Defer(FrameTiming.NowMs()))
                             {
                                 if(result.Error==FocusTransaction.ActivationFailure)
@@ -171,7 +244,9 @@ internal sealed class AutomationService(string dataRoot,string engineRoot,bool d
                                 }
                                 journal.Write("takeover_deferred",new{retryBudget.Attempts,retryBudget.Expires,result.Error});
                             }
-                            else{localFailures=0;focusRetryPermit=null;retryBudget.Clear();core.ActionFinished(result.Started,result.Restored,FrameTiming.NowMs(),result.LastSource,result.Deferred && result.Error!=FocusTransaction.ActivationFailure?"画面或操作持续未稳定，本次接管已暂停，请稍后再试":result.Error,result.ControlTransferred);
+                            else if(session.IsWujie&&result.Error==FocusTransaction.ActivationFailure&&activeLease?.InputAttempted!=true)
+                                WaitForGameForeground(true);
+                            else{foregroundRecovery=false;foregroundRecoveryAfter=null;localFailures=0;focusRetryPermit=null;retryBudget.Clear();core.ActionFinished(result.Started,result.Restored,FrameTiming.NowMs(),result.LastSource,result.Deferred && result.Error!=FocusTransaction.ActivationFailure?"画面或操作持续未稳定，本次接管已暂停，请稍后再试":result.Error,result.ControlTransferred);
                                 if(result.Started){double current=FrameTiming.NowMs();bool adopted=core.AdoptStartCountdown(startupSamples,inputCompleted,current);journal.Write("startup_countdown",new{adopted,samples=startupSamples.Select(o=>new{o.Source,o.Now,o.CountdownSeconds,o.CountdownQuality,o.CountdownReason}),core.Countdown.EndSourceMs,appliedAt=current});
                                     foreach(var sample in startupSamples)experience?.Observe(sample,core.State,core.Returns,core.Countdown.Reanchors,core.NextObservationDelayMs(current));
                                     if(startupSamples.Count>0){var latest=startupSamples[^1];image=latest.ImagePath;frameTime=DateTime.Now;age=current-latest.Source;}}
@@ -180,6 +255,8 @@ internal sealed class AutomationService(string dataRoot,string engineRoot,bool d
                         }
                     }
                 }
+                else if(foregroundRecovery&&!Mode.Enabled&&!retryBudget.CanResume(FrameTiming.NowMs()))
+                    Interlocked.Exchange(ref approvalRequested,1);
                 else {Interlocked.Exchange(ref approvalRequested,0);Interlocked.Exchange(ref approval,0);}
 
                 if(!core.Done)
@@ -212,9 +289,14 @@ internal sealed class AutomationService(string dataRoot,string engineRoot,bool d
             var target=InputPreflight.Read(session.Pid);var self=InputPreflight.Read((uint)Environment.ProcessId);
             var current=WindowGeometryReader.Read(session.Window);
             var point=p.Map.ScreenCenter(p.Icon??throw new IOException("当前帧没有入口位置"),current);int x=point.X,y=point.Y;
-            return new(session.Identity,desktop.Foreground==session.Window,InputNative.GetAncestor(InputNative.WindowFromPoint(new InputNative.Point{X=x,Y=y}),2)==session.Window,
-                p.Map.Matches(current),!FocusTransaction.CanDispatch(desktop,lease,session.Window,session.Pid,Cancelled()),InputNative.ButtonHeld,InputPreflight.Compare(self.IntegrityRid,target.IntegrityRid),
-                p.Observation.Location,p.Observation.Count,p.Map.Width,p.Map.Height,FrameTiming.NowMs()-p.Observation.Source,p.Icon,p.Observation.D2,WindowFrame:true,UiScale:p.UiScale);
+            bool identity=session.Identity,foreground=desktop.Foreground==session.Window;
+            bool hit=InputNative.GetAncestor(InputNative.WindowFromPoint(new InputNative.Point{X=x,Y=y}),2)==session.Window;
+            bool cancelled=!FocusTransaction.CanDispatch(desktop,lease,session.Window,session.Pid,Cancelled()),held=InputNative.ButtonHeld;
+            double now=FrameTiming.NowMs(),age=now-p.Observation.Source;
+            if(session.IsWujie&&age>=0)age=Math.Max(age,now-seed.Observation.Source);
+            return new(identity,foreground,hit,p.Map.Matches(current)&&(!session.IsWujie||p.Observation.Geometry&&!Win32RO.IsIconic(session.Window)),cancelled,held,InputPreflight.Compare(self.IntegrityRid,target.IntegrityRid),
+                p.Observation.Location,p.Observation.Count,p.Map.Width,p.Map.Height,age,
+                p.Icon,p.Observation.D2,WindowFrame:true,UiScale:p.UiScale,WujieWindow:session.IsWujie);
         }
         // Normal path uses current local classifiers. A logged, single full
         // compatibility recheck remains available if the local path fails.
@@ -231,7 +313,7 @@ internal sealed class AutomationService(string dataRoot,string engineRoot,bool d
         journal.Write("click_intent",new{screenPoint=new[]{sx,sy},source=b.Observation.Source,geometry=b.Map.Snapshot,foregroundBeforeClickMs=FrameTiming.NowMs()-foregroundSince,b.Metrics,fastPixelSource=fast.Source,fastPixelCheckMs=fast.ElapsedMs});
         InputNative.LastPressSent=InputNative.LastReleaseSent=null;var shot=new OneShot();bool pressInvoked=false;
         (uint PressSent,uint ReleaseSent) sent;
-        try{sent=shot.Submit(Check(b),()=>Mode.Dispatch(permitted??(()=>true),()=>{if(!FocusTransaction.CanDispatch(desktop,lease,session.Window,session.Pid,Cancelled()))throw new OperationCanceledException("接管状态变化，未发起点击");b.Map.EnsureCurrent(WindowGeometryReader.Read(session.Window));pressInvoked=true;lease.InputAttempted=true;lease.SafeToRestore=false;Interlocked.Exchange(ref buttonPending,1);return InputNative.Press(sx,sy);}),()=>{Thread.Sleep(80);token.ThrowIfCancellationRequested();},()=>pressInvoked?InputNative.Release():0);}
+        try{sent=shot.Submit(Check(b),()=>Mode.Dispatch(permitted??(()=>true),()=>{if(!FocusTransaction.CanDispatch(desktop,lease,session.Window,session.Pid,Cancelled())||session.IsWujie&&Win32RO.IsIconic(session.Window))throw new OperationCanceledException("接管状态变化，未发起点击");b.Map.EnsureCurrent(WindowGeometryReader.Read(session.Window));pressInvoked=true;lease.InputAttempted=true;lease.SafeToRestore=false;Interlocked.Exchange(ref buttonPending,1);return InputNative.Press(sx,sy);}),()=>{Thread.Sleep(80);token.ThrowIfCancellationRequested();},()=>pressInvoked?InputNative.Release():0);}
         finally
         {
             if(pressInvoked)
@@ -250,7 +332,9 @@ internal sealed class AutomationService(string dataRoot,string engineRoot,bool d
         {
             if(token.WaitHandle.WaitOne(200))throw new OperationCanceledException();var p=Capture();lastSource=p.Observation.Source;
             countdownSample?.Invoke(p.Observation,completed);
-            feedback.Observe(new(p.Observation.Source,FrameTiming.NowMs(),session.Identity,desktop.Foreground==session.Window,p.Bounds==b.Bounds,p.Observation.Location,p.Observation.Count,p.Observation.D2));
+            feedback.Observe(new(p.Observation.Source,FrameTiming.NowMs(),session.Identity,desktop.Foreground==session.Window,
+                session.IsWujie?p.Observation.Geometry&&p.Map.Snapshot==b.Map.Snapshot:p.Bounds==b.Bounds,p.Observation.Location,p.Observation.Count,p.Observation.D2,
+                StopButtonVisible:p.Observation.StopButtonVisible));
             journal.Write("start_feedback_sample",new{index=i+1,p.Observation.Source,p.Observation.Now,sourceAgeMs=p.Observation.Now-p.Observation.Source,p.Observation.Identity,p.Observation.Geometry,p.Observation.Location,p.Observation.Count,p.Observation.D2,p.Observation.PanelLocation,p.Observation.CountdownSeconds,p.Observation.CountdownQuality,p.Observation.CountdownReason,p.Metrics,feedbackState=feedback.State.ToString(),feedback.Reason,session.TimerEvidencePath,session.TimerEvidenceError,session.EntryEvidencePath,session.EntryEvidenceError});
             if(feedback.State==FeedbackState.StartFeedbackObserved)break;
         }

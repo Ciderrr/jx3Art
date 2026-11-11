@@ -12,29 +12,42 @@ internal sealed class GameSession:IDisposable
     readonly WgcEngine engine=new();readonly BitmapFrameTransport transport;readonly string script;readonly DateTime processStarted;int frameId;
     readonly CountdownReader countdown=new();readonly UiScaleHint scaleHint=new();
     readonly RecognizerWorker recognizer;
+    readonly WujieTarget? wujie;
     readonly BitmapFrameTransport localTransport;int localFrameId;
     readonly EntryEvidenceStore entryEvidence;readonly TimerEvidenceStore timerEvidence;
     internal string? TimerEvidencePath{get;private set;}internal string? TimerEvidenceError{get;private set;}
     internal string? EntryEvidencePath{get;private set;}internal string? EntryEvidenceError{get;private set;}
     internal nint Window{get;}internal uint Pid{get;}
+    internal bool IsWujie=>wujie!=null;
     internal bool Identity
     {
         get
         {
+            if(wujie!=null){try{wujie.EnsureCurrent(allowMinimized:true);return true;}catch{return false;}}
             if(!Win32RO.IsWindow(Window))return false;Win32RO.GetWindowThreadProcessId(Window,out uint pid);if(pid!=Pid)return false;
             try{using var process=Process.GetProcessById((int)Pid);return process.ProcessName.Equals("JX3ClientX64",StringComparison.OrdinalIgnoreCase) && process.StartTime.ToUniversalTime()==processStarted;}catch{return false;}
         }
     }
-    internal GameSession(string engineRoot,string cache)
+    internal GameSession(string engineRoot,string cache,string? wujieTemplates=null)
     {
         if(!Win32RO.AreDpiAwarenessContextsEqual(Win32RO.GetThreadDpiAwarenessContext(),Win32RO.PMv2))throw new IOException("DPI物理坐标上下文未确认，已停止准备输入");
-        uint expectedPid;
-        var processes=Process.GetProcessesByName("JX3ClientX64");try{if(processes.Length!=1)throw new InvalidOperationException("需要且只支持一个已打开的剑网3客户端");expectedPid=(uint)processes[0].Id;}finally{foreach(var p in processes)p.Dispose();}
-        var (window,pid,error)=Win32RO.LocateGame(expectedPid);if(window==0)throw new IOException("未找到游戏："+error);
-        using var process=Process.GetProcessById((int)pid);
-        if(!string.Equals(process.ProcessName,"JX3ClientX64",StringComparison.OrdinalIgnoreCase))throw new IOException("目标不是游戏客户端");
-        processStarted=process.StartTime.ToUniversalTime();
-        Window=window;Pid=pid;EngineBundle.Validate(engineRoot);script=Path.Combine(engineRoot,"diagnostics/one_click/locate.py");recognizer=new(script);
+        if(wujieTemplates!=null)
+        {
+            script=Path.Combine(AppContext.BaseDirectory,"wujie-local","replay.py");
+            if(!File.Exists(script)||!Directory.Exists(wujieTemplates))throw new IOException("极速端本地试用识别配置缺失");
+            wujie=WujieTarget.Bind();Window=wujie.Window;Pid=(uint)wujie.Pid;processStarted=wujie.Started;
+        }
+        else
+        {
+            uint expectedPid;
+            var processes=Process.GetProcessesByName("JX3ClientX64");try{if(processes.Length!=1)throw new InvalidOperationException("需要且只支持一个已打开的剑网3客户端");expectedPid=(uint)processes[0].Id;}finally{foreach(var p in processes)p.Dispose();}
+            var (window,pid,error)=Win32RO.LocateGame(expectedPid);if(window==0)throw new IOException("未找到游戏："+error);
+            using var process=Process.GetProcessById((int)pid);
+            if(!string.Equals(process.ProcessName,"JX3ClientX64",StringComparison.OrdinalIgnoreCase))throw new IOException("目标不是游戏客户端");
+            processStarted=process.StartTime.ToUniversalTime();
+            Window=window;Pid=pid;script=Path.Combine(engineRoot,"diagnostics/one_click/locate.py");
+        }
+        EngineBundle.Validate(engineRoot);recognizer=new(script,wujieTemplates);
         Cache.Prepare(cache);timerEvidence=new(Path.Combine(cache,"timer-evidence"));entryEvidence=new(Path.Combine(cache,"entry-evidence"));transport=new(cache);localTransport=new(cache);string? start=engine.Start(Window);if(start!=null){engine.Dispose();throw new IOException(start);}
     }
     internal Picture Capture(CancellationToken token,double sourceAfter=double.NegativeInfinity)
@@ -59,6 +72,24 @@ internal sealed class GameSession:IDisposable
         double transportCompleted=FrameTiming.NowMs();
         string text=recognizer.Read(path,map.ClientInFrame,scaleHint.For(before),token);
         double recognitionCompleted=FrameTiming.NowMs();
+        if(IsWujie)
+        {
+            var visual=ObservationEvidence.Read(text,map);
+            bool currentIdentity=Identity;
+            bool geometry=currentIdentity&&map.Matches(WindowGeometryReader.Read(Window));
+            double readAt=FrameTiming.NowMs();
+            var sample=WujieObservation(visual,frame.FrameQpcMs,readAt,currentIdentity,geometry,path);
+            if(visual.Timer is {} region&&CountdownReader.Eligible(sample))
+            {
+                var reading=ReadWujieTimer(frame.Bgra,map,region,readAt-frame.FrameQpcMs,token);
+                currentIdentity=Identity;geometry=currentIdentity&&map.Matches(WindowGeometryReader.Read(Window));
+                sample=sample with{CountdownSeconds=reading.Seconds,CountdownQuality=reading.Quality,CountdownReason=reading.Reason};
+            }
+            double completed=FrameTiming.NowMs();
+            sample=sample with{Now=completed,Identity=currentIdentity,Geometry=geometry};
+            return new(sample,visual.Entry,bounds,path,map,Metrics:new(mapCompleted-captureStarted,transportCompleted-mapCompleted,
+                recognitionCompleted-transportCompleted,completed-recognitionCompleted,completed-captureStarted));
+        }
         {
             var timerBox=WindowFramePolicy.Validate(text,map);var numericRegion=timerBox??WindowFramePolicy.SearchRegion(text,map);
             var observation=ReadObservation(text,frame.FrameQpcMs,FrameTiming.NowMs(),Identity,Jx3.OneClickTest.Native.Bounds(Window)==bounds,path,out var icon);
@@ -95,6 +126,22 @@ internal sealed class GameSession:IDisposable
             var smallEvidence=WindowFramePolicy.SmallEvidence(text);
             double completed=FrameTiming.NowMs();return new(observation,icon,bounds,path,map,uiScale,new(mapCompleted-captureStarted,transportCompleted-mapCompleted,recognitionCompleted-transportCompleted,completed-recognitionCompleted,completed-captureStarted,recognizer.Scheduling,recovery.Status,recovery.Attempts,recovery.Original,recovery.Selected,verification,smallEvidence),entryProof);
         }
+    }
+    CountdownReading ReadWujieTimer(byte[] data,WindowFrameMap map,Box region,double age,CancellationToken token)
+    {
+        double budget=Math.Min(600,ClickPolicy.MaxFrameAgeMs-age);
+        if(!double.IsFinite(age)||age<0||budget<=0)return CountdownReading.Unknown("wujie_timer_frame_stale");
+        using var deadline=CancellationTokenSource.CreateLinkedTokenSource(token);
+        deadline.CancelAfter(TimeSpan.FromMilliseconds(budget));
+        try{return countdown.ReadWujieRegion(data,map.Width,map.Height,region,deadline.Token).GetAwaiter().GetResult();}
+        catch(OperationCanceledException) when(!token.IsCancellationRequested){return CountdownReading.Unknown("wujie_timer_ocr_timeout");}
+    }
+    internal static Observation WujieObservation(VisualEvidence visual,double source,double now,bool identity,bool geometry,string path)
+    {
+        bool entry=visual.State=="ENTRY",expanded=visual.State=="PERFORMING_EXPANDED",stop=visual.State=="PERFORMING_STOP_BUTTON";
+        return new(source,now,identity,geometry,entry?"UNIQUE_CANDIDATE":expanded||stop?"NO_VERIFIED_CANDIDATE":"NOT_EVALUABLE",
+            entry?1:0,expanded?"VISIBLE":"UNKNOWN",path,CountdownReason:expanded?"wujie_timer_unverified":stop?"wujie_panel_not_visible":"not_read",
+            PanelLocated:expanded,PanelLocation:expanded?"UNIQUE_PANEL":"NO_VERIFIED_PANEL",StopButtonVisible:stop);
     }
     internal static Observation ReadObservation(string text,double source,double now,bool identity,bool geometry,string path,out Box? icon)
     {

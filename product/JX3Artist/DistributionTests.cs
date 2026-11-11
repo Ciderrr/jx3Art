@@ -3,6 +3,9 @@ using System.IO.Compression;
 using System.Net.Http;
 using System.Security.Cryptography;
 using System.Text.Json;
+using System.Windows;
+using System.Windows.Media;
+using System.Windows.Media.Imaging;
 
 namespace JX3Artist;
 
@@ -51,6 +54,25 @@ internal static class DistributionTests
             foreach (var (pixels, width) in new[] { (44, 48), (66, 128), (88, 128), (300, 256) })
                 if (AppIcon.ImageSource(pixels).PixelWidth != width)
                     throw new Exception($"unexpected image frame for {pixels}px");
+        });
+        test("update window follows active skin and uses one shared button style",()=>
+        {
+            foreach(string skin in new[]{"幕间","墨场"})
+            {
+                var window=UpdateDialog.CreateWindow(null,skin);
+                try
+                {
+                    var close=window.Action("关闭",()=>{});
+                    var download=window.Action("下载并更新",()=>{},true);
+                    if(!ReferenceEquals(close.Style,download.Style)||close.FontSize!=download.FontSize||
+                        close.MinHeight!=download.MinHeight||!Equals(window.Background,window.Resources["Surface"])||
+                        window.WindowStyle!=WindowStyle.None||
+                        window.Content is not System.Windows.Controls.Border { Child:System.Windows.Controls.StackPanel panel }||
+                        !panel.Children.Contains(window.Status))
+                        throw new InvalidOperationException("inconsistent update typography, control or palette");
+                }
+                finally{window.Close();}
+            }
         });
         test("portable update validates the whole archive before writing and refuses an existing version directory", () =>
         {
@@ -114,6 +136,33 @@ internal static class DistributionTests
                 Directory.Delete(work);
             }
         });
+    }
+
+    internal static void RenderUpdatePreviews(string output)
+    {
+        foreach(var (skin,name,available) in new[]{("幕间","update-default",true),("墨场","update-dark",true),("幕间","update-current",false)})
+        {
+            var window=UpdateDialog.CreateWindow(null,skin);
+            try
+            {
+                window.Status.Text=available?"可更新到 v1.0.2":"当前已是最新版本";
+                window.Detail.Text=available?"需要下载约 139 MB。便携版会在新目录打开，原目录可用于回退。":"已核对 GitHub 正式发行版。";
+                window.Progress.Visibility=Visibility.Collapsed;
+                window.Action("关闭",()=>{});
+                window.Action("发布页",()=>{});
+                if(available)window.Action("下载并更新",()=>{},true);
+                var body=(FrameworkElement)window.Content;
+                body.Measure(new Size(window.Width,double.PositiveInfinity));
+                var size=body.DesiredSize;
+                body.Arrange(new Rect(size));body.UpdateLayout();
+                var bitmap=new RenderTargetBitmap((int)Math.Ceiling(size.Width*1.5),(int)Math.Ceiling(size.Height*1.5),
+                    144,144,PixelFormats.Pbgra32);
+                bitmap.Render(body);
+                var encoder=new PngBitmapEncoder();encoder.Frames.Add(BitmapFrame.Create(bitmap));
+                using var stream=File.Create(Path.Combine(output,name+".png"));encoder.Save(stream);
+            }
+            finally{window.Close();}
+        }
     }
 
     static string ReleaseJson(string tag, string asset, bool prerelease) => JsonSerializer.Serialize(new

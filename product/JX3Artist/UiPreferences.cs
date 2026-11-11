@@ -1,7 +1,7 @@
 using System.IO;
 using System.Text.Json;
 namespace JX3Artist;
-internal sealed record UiPreferences(int maxStarts=3,string skin="幕间",bool skipReminder=false,bool unattended=false,string startHotkey="F7",string stopHotkey="F8",int preparationRevision=0,string appIcon="01-yunxiu")
+internal sealed record UiPreferences(int maxStarts=3,string skin="幕间",bool skipReminder=false,bool unattended=false,string startHotkey="F7",string stopHotkey="F8",int preparationRevision=0,string appIcon="01-yunxiu",bool useWujie=false)
 {
     internal const int CurrentPreparationRevision=1;
     internal bool NeedsPreparation=>!skipReminder||preparationRevision<CurrentPreparationRevision;

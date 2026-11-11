@@ -3,7 +3,7 @@ namespace Jx3.OneClickTest;
 
 internal enum FeedbackState { NotSubmitted, AwaitingFeedback, FeedbackUnknown, StartFeedbackObserved, InputRejected, TimedOut, Cancelled, Aborted, FeedbackInsufficient }
 internal record FeedbackSample(double SourceQpcMs,double NowQpcMs,bool Identity,bool Foreground,bool Geometry,
-    string Location,int CandidateCount,string D2,bool CaptureOk=true);
+    string Location,int CandidateCount,string D2,bool CaptureOk=true,bool StopButtonVisible=false);
 internal enum FeedbackFocus { Foreground, Background, Any }
 
 // Visual response only, NOT a full game-state/complete-performance classifier.
@@ -51,10 +51,10 @@ internal sealed class StartFeedback(FeedbackFocus requiredFocus=FeedbackFocus.Fo
         lastSource=source;
         // No candidate is NOT a global absence claim. It only avoids an explicit
         // conflicting entry candidate while requiring independent positive D2 evidence.
-        if(sample.D2=="VISIBLE" && sample.Location=="NO_VERIFIED_CANDIDATE" && sample.CandidateCount==0)
+        if((sample.D2=="VISIBLE"||sample.StopButtonVisible) && sample.Location=="NO_VERIFIED_CANDIDATE" && sample.CandidateCount==0)
         {
             Consecutive++;State=Consecutive>=2?FeedbackState.StartFeedbackObserved:FeedbackState.AwaitingFeedback;
-            Reason=Consecutive>=2?"two distinct fresh frames show countdown-panel feedback":"one feedback sample; another required";
+            Reason=Consecutive>=2?(sample.StopButtonVisible?"two distinct fresh frames show performance feedback":"two distinct fresh frames show countdown-panel feedback"):"one feedback sample; another required";
             if(State==FeedbackState.StartFeedbackObserved)EverObserved=true;
         }
         else Unknown(sample.D2=="VISIBLE"?"panel and entry/localization evidence conflict":"no sufficient start feedback");

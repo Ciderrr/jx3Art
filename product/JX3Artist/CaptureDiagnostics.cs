@@ -10,8 +10,8 @@ internal static class CaptureDiagnostics
     {
         var reasons=new List<string>();
         if(!e.Identity)reasons.Add("TARGET_IDENTITY_LOST");
-        if(e.Stage=="before_pull")
-        {if(e.Minimized)reasons.Add("WINDOW_MINIMIZED");return reasons.ToArray();}
+        if(e.Minimized)reasons.Add("WINDOW_MINIMIZED");
+        if(e.Stage=="before_pull")return reasons.ToArray();
         if(e.FrameOk!=true)reasons.Add("FRAME_UNAVAILABLE");
         if(e.Recreated==true)reasons.Add("FRAME_POOL_RECREATED");
         if(e.After==null)reasons.Add("WINDOW_BOUNDS_UNAVAILABLE");
@@ -28,11 +28,13 @@ internal static class CaptureDiagnostics
     }
     internal static void Ensure(CaptureEvidence evidence)
     {var reasons=Reasons(evidence);if(reasons.Length>0)throw new CaptureFailureException(evidence,reasons);}
+    internal static bool WaitForRestore(bool wujie,bool identity,Exception error)=>
+        wujie&&identity&&error is CaptureFailureException {Evidence.Minimized:true};
     internal static string Describe(string code)=>code switch
     {
         "PIXEL_MAP_NOT_VERIFIED"=>"窗口与采集画面坐标未确认，请等待新画面",
         "TARGET_IDENTITY_LOST"=>"游戏窗口身份已失效",
-        "WINDOW_MINIMIZED"=>"游戏已最小化，请恢复窗口",
+        "WINDOW_MINIMIZED"=>WujieTarget.CaptureWindowMinimized,
         "FRAME_UNAVAILABLE"=>"采集未取得有效画面",
         "FRAME_POOL_RECREATED"=>"采集缓冲区刚重建，等待稳定画面",
         "WINDOW_BOUNDS_UNAVAILABLE"=>"无法读取游戏窗口范围",

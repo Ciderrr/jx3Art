@@ -60,8 +60,26 @@ internal static class Program
         bool smoke=args.Contains("--ui-smoke"),demo=uiChecks || smoke || args.Contains("--demo");
         string folder=Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),"JX3ArtistAutomation");
         if(demo){int i=Array.IndexOf(args,"--out");folder=Path.Combine(Path.GetFullPath(i>=0 && i+1<args.Length?args[i+1]:"ui_demo_"+Guid.NewGuid().ToString("N")),"data");}
+        string? wujieTemplates=null;
         try
         {
+            int trial=Array.IndexOf(args,"--wujie-trial");
+            string localTrial=Path.Combine(AppContext.BaseDirectory,"wujie-local");
+            bool localRecognizer=!demo&&File.Exists(Path.Combine(localTrial,"replay.py"));
+            if(trial>=0)
+            {
+                if(!localRecognizer||trial+1>=args.Length)
+                    throw new InvalidOperationException("此入口需要本地极速端试用包和识别模板目录。");
+                wujieTemplates=Path.GetFullPath(args[trial+1]);
+                if(!Directory.Exists(wujieTemplates))throw new DirectoryNotFoundException("极速端试用模板目录不存在。");
+            }
+            else if(localRecognizer)
+            {
+                string templates=Path.Combine(localTrial,"templates");
+                if(new[]{"entry.png","stop.png","rose.png","header.png","fold.png"}.All(name=>File.Exists(Path.Combine(templates,name))))
+                    wujieTemplates=templates;
+            }
+            if(localRecognizer)folder=Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),"JX3ArtistWujieTrial");
             bool first=true;using var mutex=demo?null:new Mutex(true,"Local\\JX3ArtistAutomation-v01",out first);
             if(!first && !demo){MessageBox.Show("软件已在运行，请从任务栏打开。","艺人助手");return 0;}
             Directory.CreateDirectory(folder);var app=new Application();MainWindow? window=null;WebHostWindow? webWindow=null;
@@ -78,7 +96,7 @@ internal static class Program
                 using(var recording=demo?null:new ResourceRecording(folder))
                 using(var experience=demo?null:new ExperienceSession(folder))
                 {
-                    webWindow=new WebHostWindow(folder,Path.Combine(AppContext.BaseDirectory,"engine"),demo,recording,experience);
+                    webWindow=new WebHostWindow(folder,Path.Combine(AppContext.BaseDirectory,"engine"),demo,recording,experience,wujieTemplates,startInWujie:trial>=0);
                     app.MainWindow=webWindow;
                     code=app.Run(webWindow);
                 }

@@ -4,9 +4,9 @@ internal sealed record AssistanceNotice(string Kind,string Title,string Text,boo
 internal sealed class LifecycleNotices
 {
     readonly object gate=new();readonly Queue<AssistanceNotice> pending=new();
-    Phase previous=Phase.Stopped;bool waiting,closed;
+    Phase previous=Phase.Stopped;bool waiting,foregroundRecovery,closed;
     internal void Close(){lock(gate){closed=true;pending.Clear();}}
-    internal void Begin(){lock(gate){if(closed)return;previous=Phase.Watching;waiting=false;pending.Enqueue(new("started","辅助已开始","正在确认当前表演状态。"));}}
+    internal void Begin(){lock(gate){if(closed)return;previous=Phase.Watching;waiting=foregroundRecovery=false;pending.Enqueue(new("started","辅助已开始","正在确认当前表演状态。"));}}
     internal void Observe(ViewState view,bool automatic)
     {
         lock(gate){
@@ -17,12 +17,19 @@ internal sealed class LifecycleNotices
                 else if(view.Phase==Phase.Stopped)pending.Enqueue(new("stopped","辅助已结束","已停止后续辅助。"));
             }
             bool needs=view.AwaitingApproval&&!automatic&&view.Phase is not (Phase.Paused or Phase.Stopped or Phase.Completed);
-            if(needs&&!waiting)pending.Enqueue(new("approval","表演已结束，等待接管","请打开艺人助手，决定是否继续表演。"));
+            if(needs&&!waiting&&!view.ForegroundRecovery)pending.Enqueue(new("approval","表演已结束，等待接管","请打开艺人助手，决定是否继续表演。"));
+            if(view.ForegroundRecovery&&!foregroundRecovery&&!view.ForegroundRechecking)
+                pending.Enqueue(new("foreground_wait","等待切回游戏",StatusSummary.ForegroundHint(false),true));
+            foregroundRecovery=view.ForegroundRecovery;
             waiting=needs;previous=view.Phase;
         }
     }
     static string PauseReason(string reason)
-        =>PauseBody(reason)+"\n问题代码："+ProblemCatalog.Identify(reason).Code;
+    {
+        var problem=ProblemCatalog.Identify(reason);
+        string advice=problem.Code=="JX3-FOCUS-001"||problem.Code.StartsWith("JX3-WUJIE-",StringComparison.Ordinal)?"\n"+problem.Advice:"";
+        return PauseBody(ProblemCatalog.UserMessage(reason))+advice+"\n问题代码："+problem.Code;
+    }
     static string PauseBody(string reason)
     {
         if(reason.StartsWith("点击后未确认进入表演"))return "点击后暂未确认进入表演，已暂停后续辅助。请打开助手检查当前游戏状态。";
@@ -32,6 +39,24 @@ internal sealed class LifecycleNotices
     internal bool TryTake(out AssistanceNotice? notice){lock(gate){if(pending.Count==0){notice=null;return false;}notice=pending.Dequeue();return true;}}
     internal static void AddTests(Action<string,Action> test)
     {
+        test("focus refusal remains a pause with actionable recovery guidance",()=>{
+            var notices=new LifecycleNotices();
+            notices.Observe(new(Phase.Paused,FocusTransaction.ActivationFailure),true);
+            if(!notices.TryTake(out var notice)||notice!.Kind!="paused"||!notice.Text.Contains("手动切回游戏")||
+                !notice.Text.Contains("JX3-FOCUS-001")||notices.TryTake(out _))throw new Exception("focus pause guidance missing or repeated");
+            string display=ProblemCatalog.PauseMessage(FocusTransaction.ActivationFailure,"F9");
+            if(!display.Contains("按 F9")||!display.Contains("JX3-FOCUS-001"))throw new Exception("configured restart shortcut not shown");
+        });
+        test("waiting for the game foreground announces the recovery only once",()=>
+        {
+            var notices=new LifecycleNotices();
+            var view=new ViewState(Phase.WaitingVisibility,"等待",ForegroundRecovery:true);
+            notices.Observe(view,true);
+            notices.Observe(view with{ForegroundRechecking=true},true);
+            notices.Observe(view,true);
+            if(!notices.TryTake(out var notice)||notice!.Kind!="foreground_wait"||!notice.Text.Contains("本轮计划已保留")||notices.TryTake(out _))
+                throw new Exception("foreground recovery notice duplicated or missing");
+        });
         test("lifecycle notifications retain fast Start Pause and End instead of UI sampling",()=>{
             var notices=new LifecycleNotices();notices.Observe(new(Phase.Stopped,"等待开始"),false);if(notices.TryTake(out _))throw new Exception("idle startup notified");
             notices.Begin();notices.Observe(new(Phase.Paused,"点击后未确认进入表演，测试原因"),false);notices.Observe(new(Phase.Paused,"same pause"),false);notices.Observe(new(Phase.Stopped,"已停止"),false);

@@ -91,7 +91,9 @@ internal sealed class ExperienceSession:IDisposable
         // Statistics may degrade independently; they never interrupt automation.
         try{lock(gate){
             if(closed)return;
-            bool valid=round>=0&&reanchors>=0&&nextInterval is >0 and <=120000&&sample.Identity&&sample.Geometry&&sample.Location=="NO_VERIFIED_CANDIDATE"&&sample.Count==0&&sample.D2=="VISIBLE"&&sample.PanelLocated&&sample.PanelLocation=="UNIQUE_PANEL"&&double.IsFinite(sample.Source)&&double.IsFinite(sample.Now)&&sample.Source>=OpenedAt&&sample.Source<long.MaxValue&&sample.Now>=sample.Source&&sample.Now-sample.Source<=3000;
+            bool performing=sample.D2=="VISIBLE"&&sample.PanelLocated&&sample.PanelLocation=="UNIQUE_PANEL"||
+                sample.StopButtonVisible&&sample.D2=="UNKNOWN"&&!sample.PanelLocated&&sample.PanelLocation=="NO_VERIFIED_PANEL";
+            bool valid=round>=0&&reanchors>=0&&nextInterval is >0 and <=120000&&sample.Identity&&sample.Geometry&&sample.Location=="NO_VERIFIED_CANDIDATE"&&sample.Count==0&&performing&&double.IsFinite(sample.Source)&&double.IsFinite(sample.Now)&&sample.Source>=OpenedAt&&sample.Source<long.MaxValue&&sample.Now>=sample.Source&&sample.Now-sample.Source<=3000;
             if(!valid){estimate.Suspend();pendingPanel=null;lastTimerEnd=null;Queue();return;}
             // A replayed panel cannot change round/clock metadata before the
             // numeric core gets a chance to reject its already-seen source.

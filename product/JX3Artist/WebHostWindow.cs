@@ -1,6 +1,7 @@
 using System.ComponentModel;
 using System.Diagnostics;
 using System.IO;
+using System.Runtime.InteropServices;
 using System.Text.Json;
 using System.Windows;
 using System.Windows.Controls;
@@ -15,31 +16,37 @@ using Microsoft.Web.WebView2.Wpf;
 namespace JX3Artist;
 internal sealed class WebHostWindow:Window
 {
-    readonly string dataRoot;readonly bool demo;readonly bool privileged;readonly ExperienceSession experience;readonly bool ownsExperience;readonly ResourceRecording? recording;
+    [DllImport("kernel32.dll")]static extern nint GetCurrentProcess();
+    [DllImport("kernel32.dll")]static extern bool TerminateProcess(nint process,uint exitCode);
+    readonly string dataRoot;readonly bool demo;readonly bool privileged;readonly bool wujieAvailable;readonly ExperienceSession experience;readonly bool ownsExperience;readonly ResourceRecording? recording;
     internal readonly AutomationService Service;internal readonly WebView2 Browser=new();readonly DispatcherTimer timer;
     readonly Grid root=new();readonly StackPanel emergency=new(){Margin=new Thickness(32)};readonly TextBlock emergencyText=new(){TextWrapping=TextWrapping.Wrap,FontSize=16};
     UiPreferences preferences=new();AssistantHotkeys? hotkeys;WindowsNotice? notice;HwndSource? source;nint handle;bool ready,closing,allowClose,ever;DateTime closeAt;string? uiError;long epoch,revision,lastId;string? pendingPreparation;string pendingOrigin="button";double lastHeartbeat;int activePlan;double demoDeadline;bool editing;string? captureTarget;
     internal bool Diagnostic;internal bool Ready=>ready;internal bool Editing=>editing;internal string? CaptureTarget=>captureTarget;internal long Epoch=>epoch;
     internal ViewState? Fixture;internal bool? FixtureRunning;
     internal Func<Task<string>>? ShortcutForTest;internal Func<string,bool>? ShellForTest;internal Action<string>? ClipboardForTest;internal Func<string?>? SaveReportPathForTest;
+    internal Action? BlockBrowserCloseForTest;
     string iconPreview="";
+    long settingsRequest;
     bool disposed,resettingExperience,uploadingIcon,checkingUpdate;
     internal UpdateLaunch? PendingUpdate { get; private set; }string? pendingReportPreview,pendingExperienceReset;
     internal ExperienceSession Experience=>experience;
     string SettingsPath=>Path.Combine(dataRoot,"settings.json");
     static readonly JsonSerializerOptions Json=new(){PropertyNamingPolicy=JsonNamingPolicy.CamelCase};
-    internal WebHostWindow(string folder,string engine,bool demo,ResourceRecording? recording=null,ExperienceSession? experience=null)
+    internal WebHostWindow(string folder,string engine,bool demo,ResourceRecording? recording=null,ExperienceSession? experience=null,string? wujieTemplates=null,bool startInWujie=false)
     {
         dataRoot=folder;this.demo=demo;privileged=demo||InputPreflight.Read((uint)Environment.ProcessId).Elevated==true;this.recording=recording;Directory.CreateDirectory(folder);ownsExperience=experience==null;this.experience=experience??new ExperienceSession(folder,memoryOnly:demo);
         try{preferences=UiPreferences.Load(SettingsPath);}catch(Exception){uiError="设置读取失败，当前使用默认设置。";}
-        if(!privileged)uiError="请正常双击助手并完成Windows管理员授权后再开始。";activePlan=preferences.maxStarts;Service=new(folder,engine,demo,this.experience);Service.Mode.Set(preferences.unattended);Service.RestorePreparationForeground=demo?null:RestoreAssistant;
+        wujieAvailable=wujieTemplates!=null;
+        preferences=preferences with{useWujie=wujieAvailable&&(startInWujie||preferences.useWujie)};
+        if(!privileged)uiError="请正常双击助手并完成Windows管理员授权后再开始。";activePlan=preferences.maxStarts;Service=new(folder,engine,demo,this.experience,wujieTemplates);Service.Mode.Set(preferences.unattended);Service.RestorePreparationForeground=demo?null:RestoreAssistant;
         Title=demo?"艺人助手 · 隔离演示（零游戏操作）":"剑网3 艺人助手";Width=960;Height=700;MinWidth=900;MinHeight=650;Background=new SolidColorBrush(Color.FromRgb(253,253,252));WindowStartupLocation=WindowStartupLocation.CenterScreen;
         WindowStyle=WindowStyle.None;ResizeMode=ResizeMode.CanResize;
         try{AppIcon.SelectedPath=IconChoices.Resolve(dataRoot,preferences.appIcon);iconPreview=IconChoices.Preview(AppIcon.FilePath);}catch{preferences=preferences with{appIcon="01-yunxiu"};AppIcon.SelectedPath=null;iconPreview=IconChoices.Preview(AppIcon.FilePath);uiError="已恢复默认图标，原图标无法读取。";}Icon=AppIcon.WindowSource();
         WindowChrome.SetWindowChrome(this,new WindowChrome{CaptionHeight=0,ResizeBorderThickness=new Thickness(6),GlassFrameThickness=new Thickness(0),UseAeroCaptionButtons=false});
         root.Children.Add(Browser);emergency.Children.Add(emergencyText);var stop=new Button{Content="停止辅助",Margin=new Thickness(0,20,0,0),Padding=new Thickness(20,10,20,10)};stop.Click+=(_,_)=>Stop("emergency_button");emergency.Children.Add(stop);var close=new Button{Content="关闭助手",Margin=new Thickness(0,12,0,0),Padding=new Thickness(20,10,20,10)};close.Click+=(_,_)=>Close();emergency.Children.Add(close);emergency.Visibility=Visibility.Collapsed;root.Children.Add(emergency);Content=root;
         if(recording!=null)recording.Sampled+=ResourceSample;
-        timer=new DispatcherTimer{Interval=TimeSpan.FromMilliseconds(200)};timer.Tick+=(_,_)=>Tick();Activated+=(_,_)=>lastHeartbeat=FrameTiming.NowMs();Loaded+=async(_,_)=>await Initialize();Closing+=OnClosing;Closed+=OnClosed;
+        timer=new DispatcherTimer{Interval=TimeSpan.FromMilliseconds(200)};timer.Tick+=(_,_)=>Tick();Activated+=(_,_)=>{lastHeartbeat=FrameTiming.NowMs();Publish();};Loaded+=async(_,_)=>await Initialize();Closing+=OnClosing;Closed+=OnClosed;
     }
     void ResourceSample(object value)=>Service.History.Record("resource_sample",value);
     bool RestoreAssistant(CancellationToken token)=>Dispatcher.Invoke(()=>{if(token.IsCancellationRequested||closing)return false;Show();if(WindowState==WindowState.Minimized)WindowState=WindowState.Normal;Activate();bool ok=new Desktop().Foreground==handle;if(!ok)Desktop.Notify(handle);return ok;});
@@ -49,7 +56,12 @@ internal sealed class WebHostWindow:Window
             if(Browser.ActualWidth>0){Width+=960-Browser.ActualWidth;Height+=700-Browser.ActualHeight;MinWidth=Width-60;MinHeight=Height-50;}
             handle=new WindowInteropHelper(this).Handle;Service.AssistantWindow=handle;
             hotkeys=new((id,key)=>demo||Desktop.RegisterHotKey(handle,id,key.Modifiers,key.Key),id=>{if(!demo)Desktop.UnregisterHotKey(handle,id);});try{uiError=hotkeys.Apply(preferences.startHotkey,preferences.stopHotkey)??uiError;}catch(ArgumentException){uiError="快捷键设置无效，请在设置中重新录入；当前临时使用F7/F8。";preferences=preferences with{startHotkey="F7",stopHotkey="F8"};hotkeys.Apply("F7","F8");}
-            source=HwndSource.FromHwnd(handle);source?.AddHook(Hook);if(!demo)notice=new(handle);
+            source=HwndSource.FromHwnd(handle);source?.AddHook(Hook);
+            if(!demo)
+            {
+                notice=new(handle);
+                if(!notice.EnsureIcon())uiError??="未能显示通知区域图标。";
+            }
             var env=await CoreWebView2Environment.CreateAsync(userDataFolder:Path.Combine(dataRoot,"webview-profile"));await Browser.EnsureCoreWebView2Async(env);
             var core=Browser.CoreWebView2;await core.Profile.ClearBrowsingDataAsync(CoreWebView2BrowsingDataKinds.DiskCache);core.Settings.AreHostObjectsAllowed=false;core.Settings.AreDefaultScriptDialogsEnabled=false;core.Settings.AreDefaultContextMenusEnabled=false;core.Settings.AreDevToolsEnabled=Diagnostic;core.Settings.IsStatusBarEnabled=false;core.Settings.AreBrowserAcceleratorKeysEnabled=false;
             core.Settings.IsNonClientRegionSupportEnabled=true;
@@ -64,7 +76,28 @@ internal sealed class WebHostWindow:Window
     nint Hook(nint hwnd,int msg,nint w,nint l,ref bool handled)
     {
         if(msg==0x312&&hotkeys?.Registered((int)w)==true){DispatchHotkey((int)w);handled=true;}
-        if(WindowsNotice.OpensAssistant(msg,l)){Show();if(WindowState==WindowState.Minimized)WindowState=WindowState.Normal;Activate();handled=true;}return 0;
+        if(WindowsNotice.RequestsMenu(msg,l))
+        {
+            Dispatcher.BeginInvoke(DispatcherPriority.Background,new Action(()=>
+            {
+                if(!closing&&notice!=null)DispatchTrayAction(notice.OpenMenu(w,l));
+            }));
+            handled=true;
+        }
+        else if(WindowsNotice.OpensAssistant(msg,l)){DispatchTrayAction(TrayAction.Open);handled=true;}
+        return 0;
+    }
+    internal void DispatchTrayAction(TrayAction action)
+    {
+        if(disposed||closing||action==TrayAction.None)return;
+        if(action==TrayAction.Exit){Close();return;}
+        Show();
+        if(WindowState==WindowState.Minimized)WindowState=WindowState.Normal;
+        if(!demo)Activate();
+        if(action!=TrayAction.Settings)return;
+        if(pendingPreparation!=null){pendingPreparation=null;epoch++;}
+        settingsRequest++;
+        Publish();
     }
     internal void DispatchHotkey(int id)
     {
@@ -82,7 +115,7 @@ internal sealed class WebHostWindow:Window
         if(preferences.NeedsPreparation){pendingOrigin=origin;pendingPreparation=Guid.NewGuid().ToString("N");}
         else Start(origin);
     }
-    void Start(string origin){demoDeadline=0;pendingPreparation=null;activePlan=preferences.maxStarts;if(Service.Start(activePlan,preferences.unattended,origin))ever=true;}
+    void Start(string origin){demoDeadline=0;pendingPreparation=null;activePlan=preferences.maxStarts;if(Service.Start(activePlan,preferences.unattended,origin,preferences.useWujie))ever=true;}
     void Save(UiPreferences next){next.Save(SettingsPath);preferences=next;Service.History.Record("settings_changed",new{success=true});}
     void OnMessage(object? sender,CoreWebView2WebMessageReceivedEventArgs e)
     {
@@ -112,7 +145,7 @@ internal sealed class WebHostWindow:Window
                     checkingUpdate=true;
                     try
                     {
-                        PendingUpdate=UpdateDialog.Show(this,dataRoot);
+                        PendingUpdate=UpdateDialog.Show(this,dataRoot,preferences.skin);
                         if(PendingUpdate!=null) _ = Dispatcher.BeginInvoke(new Action(Close));
                         result=null;
                     }
@@ -140,10 +173,10 @@ internal sealed class WebHostWindow:Window
         switch(type){
             case "requestExperienceReset":if(Service.IsRunning||closing||resettingExperience||pendingPreparation!=null)throw new InvalidOperationException("请先停止辅助，再清零累计经验。");pendingExperienceReset=Guid.NewGuid().ToString("N");return pendingExperienceReset;
             case "cancelExperienceReset":if(!resettingExperience)pendingExperienceReset=null;break;
-            case "ready":ready=true;lastHeartbeat=FrameTiming.NowMs();if(!Diagnostic&&preferences.NeedsPreparation&&!ever&&CanStart&&pendingPreparation==null)RequestStart("button");break;
+            case "ready":ready=true;lastHeartbeat=FrameTiming.NowMs();if(!Diagnostic&&!wujieAvailable&&preferences.NeedsPreparation&&!ever&&CanStart&&pendingPreparation==null)RequestStart("button");break;
             case "minimize":WindowState=WindowState.Minimized;break;
             case "maximize":WindowState=WindowState==WindowState.Maximized?WindowState.Normal:WindowState.Maximized;break;
-            case "closeWindow":Close();break;
+            case "closeWindow":Dispatcher.BeginInvoke(DispatcherPriority.Background,new Action(()=>{if(!disposed&&!closing)Close();}));break;
             case "heartbeat":lastHeartbeat=FrameTiming.NowMs();break;
             case "uiContext":editing=WebUiProtocol.Boolean(p,"editing");if(!editing)captureTarget=null;break;
             case "capture":string? target=p.GetProperty("target").GetString();if(target is not (null or "start" or "stop"))throw new ArgumentException("录入目标无效");captureTarget=target;break;
@@ -158,13 +191,29 @@ internal sealed class WebHostWindow:Window
             case "setAutomatic":
                 bool automatic=WebUiProtocol.Boolean(p,"enabled");Service.SetUnattended(automatic);preferences=preferences with{unattended=automatic};try{Save(preferences);}catch{uiError="接管选项本次已生效，但未保存，下次仍使用旧设置。";}break;
             case "setPlan":if(Service.IsRunning)throw new InvalidOperationException("请先停止辅助再修改计划。");Save(preferences with{maxStarts=WebUiProtocol.Plan(p)});break;
+            case "setClient":
+                if(Service.IsRunning||closing||pendingExperienceReset!=null||resettingExperience)
+                    throw new InvalidOperationException("请先停止辅助并关闭确认窗口，再切换客户端。");
+                bool useWujie=p.GetProperty("mode").GetString() switch
+                {
+                    "flagship"=>false,
+                    "wujie" when wujieAvailable=>true,
+                    "wujie"=>throw new InvalidOperationException("当前包没有极速端试用配置。"),
+                    _=>throw new ArgumentException("未知客户端模式。")
+                };
+                if(useWujie!=preferences.useWujie)
+                {
+                    Save(preferences with{useWujie=useWujie});
+                    epoch++;pendingPreparation=null;
+                }
+                break;
             case "setReminder":Save(preferences with{skipReminder=!WebUiProtocol.Boolean(p,"enabled"),preparationRevision=UiPreferences.CurrentPreparationRevision});break;
             case "setIcon":SelectIcon(p.GetProperty("icon").GetString()??"");break;
             case "setSkin":string skin=p.GetProperty("skin").GetString()??"";if(!UiTheme.Palettes.ContainsKey(skin))throw new ArgumentException("未知皮肤");Save(preferences with{skin=skin});break;
             case "setHotkeys":
                 string a=AssistantHotkey.Parse(p.GetProperty("start").GetString()??"").Label,b=AssistantHotkey.Parse(p.GetProperty("stop").GetString()??"").Label;
                 string? error=hotkeys!.Apply(a,b);if(error!=null)throw new InvalidOperationException(error);var old=preferences;try{Save(old with{startHotkey=a,stopHotkey=b});}catch{hotkeys.Apply(old.startHotkey,old.stopHotkey);throw new InvalidOperationException("快捷键未保存，已恢复原设置。");}break;
-            case "records":return new{message=Service.Latest.Message,detail=Service.Latest.Detail,recording=recording?.Health.Message??"隔离演示，不记录真实运行资源。",history=experience.Previous is ExperienceEntry previous?$"上次估算 +{previous.Estimate.EstimatedGain:N0}":"暂无上次经验记录",saveError=experience.SaveError,preview=ReadCachedPreview(),frameAt=Service.Latest.FrameTime?.ToString("HH:mm:ss",System.Globalization.CultureInfo.InvariantCulture)};
+            case "records":return new{message=Service.Latest.Phase==Phase.Paused?ProblemCatalog.PauseMessage(Service.Latest.Message):Service.Latest.Message,detail=Service.Latest.Phase==Phase.Paused?null:Service.Latest.Detail,recording=recording?.Health.Message??"隔离演示，不记录真实运行资源。",history=experience.Previous is ExperienceEntry previous?$"上次估算 +{previous.Estimate.EstimatedGain:N0}":"暂无上次经验记录",saveError=experience.SaveError,preview=ReadCachedPreview(),frameAt=Service.Latest.FrameTime?.ToString("HH:mm:ss",System.Globalization.CultureInfo.InvariantCulture)};
             case "previewReport":pendingReportPreview=SupportReport.Preview(dataRoot,Service.Latest,Service.History.Snapshot());return pendingReportPreview;
             case "saveReport":
                 string preview=pendingReportPreview??throw new InvalidOperationException("请先预览问题报告。");
@@ -206,21 +255,53 @@ internal sealed class WebHostWindow:Window
     {
         var view=Fixture??Service.Latest;if(demo&&!Diagnostic&&view.Phase==Phase.Performing&&!view.CountdownEnd.HasValue){if(demoDeadline==0)demoDeadline=FrameTiming.NowMs()+1122000;view=view with{CountdownEnd=demoDeadline};}
         bool running=FixtureRunning??Service.IsRunning;bool stopping=Fixture==null&&Service.IsStopping&&running;
-        double now=FrameTiming.NowMs();bool time=running&&!stopping&&view.Phase is not (Phase.Stopped or Phase.Completed or Phase.Paused)&&view.CountdownEnd.HasValue;
-        int? seconds=time?CountdownTracker.DisplaySeconds(view.DisplayDeadline??view.CountdownEnd!.Value,now):null;
+        double now=FrameTiming.NowMs();
+        if(view.CountdownEstimated&&view.DisplayDeadline<=now)view=view with{CountdownEnd=null,DisplayDeadline=null,CountdownEstimated=false};
+        bool active=running&&!stopping&&!closing&&view.Phase is not (Phase.Stopped or Phase.Completed or Phase.Paused);
+        bool minimized=active&&view.GameMinimized;
+        bool foregroundWait=active&&!minimized&&view.ForegroundRecovery&&view.Phase!=Phase.Starting;
+        bool time=active&&!minimized&&view.CountdownEnd.HasValue;
+        int? seconds=minimized&&view.MinimizedDeadline is double minimizedEnd&&minimizedEnd>now
+            ?CountdownTracker.DisplaySeconds(minimizedEnd,now):time?CountdownTracker.DisplaySeconds(view.DisplayDeadline??view.CountdownEnd!.Value,now):null;
         string phase=view.Phase.ToString();string title=!running&&view.Phase is not (Phase.Paused or Phase.Completed or Phase.Stopped)?"辅助已停止":stopping?"正在停止":view.AwaitingApproval&&!preferences.unattended?"等待允许接管":view.Phase switch{Phase.Performing=>"表演中",Phase.Paused=>"辅助已暂停",Phase.WaitingVisibility=>"画面暂未确认",Phase.Completed=>"计划已完成",Phase.Stopped=>ever?"辅助已停止":"准备开始",Phase.Starting=>"正在开始表演",_=>"正在确认画面"};
+        if(minimized)title="等待恢复游戏窗口";
+        else if(foregroundWait&&!view.AwaitingApproval)title=view.ForegroundRechecking?"正在重新确认画面":"等待切回游戏";
         var estimate=experience.Read();string? health=experience.SaveError;if(Service.History.SaveErrors>0)health=(health??"")+" 问题上下文保存失败，请查看记录。";if(recording?.Health.Error!=null)health=(health??"")+" 运行诊断保存异常，请查看记录。";
-        string? reason=!running&&!ever&&view.Phase==Phase.Stopped?"请开启艺人身份，站在平整路面上，开始辅助吧！":view.Phase==Phase.Paused?view.Message+"\n问题代码："+ProblemCatalog.Identify(view.Message).Code:view.Phase==Phase.WaitingVisibility?StatusSummary.VisibilityHint(view):StatusSummary.CountdownFallback(view,preferences.unattended,running&&!stopping&&!closing);
-        return new{schema=1,version=typeof(WebHostWindow).Assembly.GetName().Version!.ToString(3),revision=++revision,epoch,phase,title,running,stopping,closing,ever=ever||view.Starts>0,starts=view.Starts,plan=running?activePlan:preferences.maxStarts,automatic=preferences.unattended,skin=preferences.skin,appIcon=preferences.appIcon,iconPreview,skipReminder=!preferences.NeedsPreparation,maximized=WindowState==WindowState.Maximized,startHotkey=preferences.startHotkey,stopHotkey=preferences.stopHotkey,seconds,reason,awaitingApproval=running&&!stopping&&view.AwaitingApproval&&!preferences.unattended,canStart=Fixture!=null?!running:CanStart,preparationToken=pendingPreparation,gain=estimate.EstimatedGain.ToString(System.Globalization.CultureInfo.InvariantCulture),total=experience.LifetimeGain?.ToString(System.Globalization.CultureInfo.InvariantCulture),partial=experience.LifetimePartial,health,error=uiError};
+        string? reason=!running&&!ever&&view.Phase==Phase.Stopped?"请开启艺人身份，站在平整路面上，开始辅助吧！":view.Phase==Phase.Paused?ProblemCatalog.PauseMessage(view.Message,hotkeys?.Registered(AssistantHotkeys.StartId)==true?preferences.startHotkey:null):view.Phase==Phase.WaitingVisibility?StatusSummary.VisibilityHint(view,now):StatusSummary.CountdownFallback(view,preferences.unattended,running&&!stopping&&!closing);
+        if(minimized)reason=StatusSummary.MinimizedHint(view,now);
+        else if(foregroundWait)reason=view.AwaitingApproval
+            ?"本轮计划已保留。请允许本次接管，再切回游戏，助手会重新确认画面。"
+            :StatusSummary.ForegroundHint(view.ForegroundRechecking);
+        return new{schema=1,settingsRequest,wujieAvailable,wujieTrial=preferences.useWujie,version=typeof(WebHostWindow).Assembly.GetName().Version!.ToString(3),revision=++revision,epoch,phase,title,running,stopping,closing,ever=ever||view.Starts>0,starts=view.Starts,plan=running?activePlan:preferences.maxStarts,automatic=preferences.unattended,skin=preferences.skin,appIcon=preferences.appIcon,iconPreview,skipReminder=!preferences.NeedsPreparation,maximized=WindowState==WindowState.Maximized,startHotkey=preferences.startHotkey,stopHotkey=preferences.stopHotkey,seconds,countdownEstimated=time&&view.CountdownEstimated,waitingHint=minimized?"minimized":foregroundWait?"foreground":null,reason,awaitingApproval=running&&!stopping&&view.AwaitingApproval&&!preferences.unattended,canStart=Fixture!=null?!running:CanStart,preparationToken=pendingPreparation,gain=estimate.EstimatedGain.ToString(System.Globalization.CultureInfo.InvariantCulture),total=experience.LifetimeGain?.ToString(System.Globalization.CultureInfo.InvariantCulture),partial=experience.LifetimePartial,health,error=uiError};
     }
     void Reply(long id,bool ok,string? error,object? result){if(disposed||Browser.CoreWebView2==null||!WebUiProtocol.Trusted(Browser.Source?.ToString()??""))return;Browser.CoreWebView2.PostWebMessageAsJson(JsonSerializer.Serialize(new{kind="reply",id,ok,error,result},Json));}
     internal void Publish(){if(disposed||!ready||Browser.CoreWebView2==null||!WebUiProtocol.Trusted(Browser.Source?.ToString()??""))return;try{Browser.CoreWebView2.PostWebMessageAsJson(JsonSerializer.Serialize(new{kind="snapshot",value=Snapshot()},Json));}catch{}}
     void Tick()
     {
         if(!closing&&IsActive&&WindowState!=WindowState.Minimized&&Service.IsRunning&&ready&&FrameTiming.NowMs()-lastHeartbeat>5000)Fail("界面响应超时，辅助已停止。");
-        if(!demo&&!closing)while(Service.Notices.TryTake(out var item)){if(item==null||item.Kind=="approval"&&(Service.Mode.Enabled||!Service.Latest.AwaitingApproval))continue;bool sent=false;try{if(handle!=0)Desktop.Notify(handle);sent=notice?.Show(item.Title,item.Text,item.Warning)==true;}catch{sent=false;}if(!sent)uiError="系统通知未能发送，请查看当前辅助状态。";try{File.AppendAllText(Path.Combine(dataRoot,"notification-events.jsonl"),JsonSerializer.Serialize(new{utc=DateTime.UtcNow,item.Kind,submitted=sent})+Environment.NewLine);}catch{uiError="通知记录未能保存。";}}
+        if(!demo&&!closing)while(Service.Notices.TryTake(out var item)){if(item==null||item.Kind=="approval"&&(Service.Mode.Enabled||!Service.Latest.AwaitingApproval)||item.Kind=="foreground_wait"&&(!Service.IsRunning||Service.IsStopping||!Service.Latest.ForegroundRecovery||Service.Latest.ForegroundRechecking))continue;bool sent=false;try{if(handle!=0)Desktop.Notify(handle);sent=notice?.Show(item.Title,item.Text,item.Warning)==true;}catch{sent=false;}if(!sent)uiError="系统通知未能发送，请查看当前辅助状态。";try{File.AppendAllText(Path.Combine(dataRoot,"notification-events.jsonl"),JsonSerializer.Serialize(new{utc=DateTime.UtcNow,item.Kind,submitted=sent})+Environment.NewLine);}catch{uiError="通知记录未能保存。";}}
         Publish();if(closing&&(!Service.IsRunning||(!Service.ButtonPending&&DateTime.UtcNow-closeAt>TimeSpan.FromSeconds(2)))){allowClose=true;Close();}
     }
     void OnClosing(object? sender,CancelEventArgs e){if(!closing){closing=true;closeAt=DateTime.UtcNow;Service.Notices.Close();notice?.Dispose();Stop("window_close");}if(!allowClose&&Service.IsRunning)e.Cancel=true;}
-    void OnClosed(object? sender,EventArgs e){disposed=true;timer.Stop();Service.Stop("window_close");notice?.Dispose();hotkeys?.Dispose();source?.RemoveHook(Hook);if(recording!=null)recording.Sampled-=ResourceSample;Service.History.Record("app_close",new{});Service.History.Dispose();Browser.Dispose();if(ownsExperience)experience.Dispose();}
+    void OnClosed(object? sender,EventArgs e)
+    {
+        disposed=true;timer.Stop();Service.Stop("window_close");
+        notice?.Dispose();hotkeys?.Dispose();source?.RemoveHook(Hook);
+        if(recording!=null)recording.Sampled-=ResourceSample;
+        Service.History.Record("app_close",new{});
+        Service.History.Dispose();
+        if(!demo||ownsExperience||BlockBrowserCloseForTest!=null)experience.Dispose();
+        recording?.Dispose();
+        if((!demo||BlockBrowserCloseForTest!=null)&&PendingUpdate==null&&
+            (recording==null||recording.Health.Closed)&&experience.SaveError==null)
+            new Thread(()=>
+            {
+                // A user-initiated close must release the instance lock even
+                // if native browser teardown stalls. Both recorders have closed.
+                Thread.Sleep(TimeSpan.FromSeconds(8));
+                if(!Service.IsRunning&&!Service.ButtonPending)TerminateProcess(GetCurrentProcess(),75);
+            }){IsBackground=true,Name="JX3Artist-close-timeout"}.Start();
+        BlockBrowserCloseForTest?.Invoke();
+        Browser.Dispose();
+    }
 }

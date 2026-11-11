@@ -5,7 +5,7 @@ using Jx3.OneClickTest;
 namespace JX3Artist;
 
 // Sequential current-frame requests only; no cached recognition or input APIs.
-internal sealed class RecognizerWorker(string script):IDisposable
+internal sealed class RecognizerWorker(string script,string? templates=null):IDisposable
 {
     Process? process;int sequence,uses;
     internal string Scheduling{get;private set;}="not_started";
@@ -13,8 +13,10 @@ internal sealed class RecognizerWorker(string script):IDisposable
     {
         cancellation.ThrowIfCancellationRequested();
         try{
-            if(process==null || process.HasExited || uses>=128){Dispose();var start=RecognizerProcess.ForFrame(script,path,content,hint);start.ArgumentList.Clear();start.ArgumentList.Add("-u");start.ArgumentList.Add("-B");start.ArgumentList.Add(script);start.ArgumentList.Add("--server");start.RedirectStandardInput=true;process=Process.Start(start)??throw new IOException("无法启动识别进程");Scheduling="python_policy_pending";uses=0;}
-            using var timeout=CancellationTokenSource.CreateLinkedTokenSource(cancellation);timeout.CancelAfter(entryPatch?400:8000);
+            if(process==null || process.HasExited || uses>=128){Dispose();var start=RecognizerProcess.ForFrame(script,path,content,hint);start.ArgumentList.Clear();start.ArgumentList.Add("-u");start.ArgumentList.Add("-B");start.ArgumentList.Add(script);start.ArgumentList.Add("--server");
+                if(templates!=null){start.ArgumentList.Add("--templates");start.ArgumentList.Add(templates);}
+                start.RedirectStandardInput=true;process=Process.Start(start)??throw new IOException("无法启动识别进程");Scheduling="python_policy_pending";uses=0;}
+            using var timeout=CancellationTokenSource.CreateLinkedTokenSource(cancellation);timeout.CancelAfter(entryPatch?400:templates!=null?3000:8000);
             int id=++sequence;
             string request=JsonSerializer.Serialize(new{id,frame=Path.GetFullPath(path),content=new[]{content.X,content.Y,content.X2,content.Y2},hint,entryPatch});
             process.StandardInput.WriteLineAsync(request.AsMemory(),timeout.Token).GetAwaiter().GetResult();process.StandardInput.FlushAsync(timeout.Token).GetAwaiter().GetResult();
