@@ -1,4 +1,4 @@
-﻿#ifndef Payload
+#ifndef Payload
   #error Specify /DPayload with the verified Windows x64 package directory
 #endif
 #ifndef Output
@@ -25,7 +25,7 @@
 #ifndef DisplayName
   #define DisplayName "剑网3 艺人助手"
 #endif
-#define AppRelease "1.0.1"
+#define AppRelease "1.1.0"
 
 [Setup]
 AppId={#AppIdentity}
@@ -65,7 +65,7 @@ Name: "chinesesimplified"; MessagesFile: "ChineseSimplified.isl"
 
 [Messages]
 WelcomeLabel1=安装艺人助手
-WelcomeLabel2=为《剑网3》旗舰端艺人表演准备。%n%n下一页可以选择安装位置和快捷方式。%n首次打开助手时，会检查所需的系统组件。
+WelcomeLabel2=为《剑网3》旗舰端与极速端单开的艺人表演准备。%n%n下一页可以选择安装位置和快捷方式。%n首次打开助手时，会检查所需的系统组件。
 ClickNext=
 FinishedHeadingLabel=艺人助手已安装
 FinishedLabel=可以从开始菜单打开助手。以后可在设置中检查更新。

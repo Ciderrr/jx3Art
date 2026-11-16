@@ -79,7 +79,8 @@ internal static class Program
                 if(new[]{"entry.png","stop.png","rose.png","header.png","fold.png"}.All(name=>File.Exists(Path.Combine(templates,name))))
                     wujieTemplates=templates;
             }
-            if(localRecognizer)folder=Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),"JX3ArtistWujieTrial");
+            if(localRecognizer&&!File.Exists(Path.Combine(AppContext.BaseDirectory,"distribution.txt")))
+                folder=Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),"JX3ArtistWujieTrial");
             bool first=true;using var mutex=demo?null:new Mutex(true,"Local\\JX3ArtistAutomation-v01",out first);
             if(!first && !demo){MessageBox.Show("软件已在运行，请从任务栏打开。","艺人助手");return 0;}
             Directory.CreateDirectory(folder);var app=new Application();MainWindow? window=null;WebHostWindow? webWindow=null;

@@ -54,7 +54,7 @@ internal sealed class LifecycleNotices
             notices.Observe(view,true);
             notices.Observe(view with{ForegroundRechecking=true},true);
             notices.Observe(view,true);
-            if(!notices.TryTake(out var notice)||notice!.Kind!="foreground_wait"||!notice.Text.Contains("本轮计划已保留")||notices.TryTake(out _))
+            if(!notices.TryTake(out var notice)||notice!.Kind!="foreground_wait"||!notice.Text.Contains("Windows已多次拒绝切回游戏，请手动切回，助手将继续")||notices.TryTake(out _))
                 throw new Exception("foreground recovery notice duplicated or missing");
         });
         test("lifecycle notifications retain fast Start Pause and End instead of UI sampling",()=>{

@@ -8,7 +8,8 @@ internal static class StatusSummary
             :"游戏已最小化，请恢复窗口。";
     internal static string ForegroundHint(bool rechecking)=>rechecking
         ?"已切回游戏。助手正在重新确认画面。"
-        :"Windows 暂未允许切回游戏。本轮计划已保留，请手动切回游戏继续。";
+        :"Windows已多次拒绝切回游戏，请手动切回，助手将继续";
+    internal const string ForegroundRetryHint="Windows 暂未允许切回游戏，正在重新确认入口后重试。";
     internal static string VisibilityHint(ViewState view,double now)
     {
         if(view.Message.StartsWith(WujieTarget.CaptureWindowMinimized,StringComparison.Ordinal))

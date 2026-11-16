@@ -43,6 +43,7 @@ html[data-skin-capture=true] .jx3-menu{visibility:hidden}
 .jx3-client-label-stack>span{grid-area:1/1;pointer-events:none}
 .jx3-client-label-reserve{visibility:hidden}
 .jx3-takeover-hint{display:grid;grid-template-columns:24px minmax(0,1fr);gap:8px;align-items:start}
+.jx3-takeover-line{display:block}
 .jx3-takeover-icon{display:grid;place-items:center;width:24px;height:24px;border-radius:6px;background:var(--surface);color:var(--muted)}
 .jx3-takeover-hint[data-automatic=true] .jx3-takeover-icon{color:#875015;background:#f7e9cd}
 .dark-theme .jx3-takeover-hint[data-automatic=true] .jx3-takeover-icon{color:#e7ba78;background:#413221}
@@ -55,4 +56,30 @@ html[data-client-capture=true] .jx3-menu{visibility:hidden}
 html[data-client-transition=running]::view-transition-group(root){animation:none}
 html[data-client-transition=running]::view-transition-old(root){animation:none;opacity:0}
 html[data-client-transition=running]::view-transition-new(root){animation:none}
-html[data-client-transition=running]::view-transition-new(artist-surface){--curtain-origin:0% 100%}
+html[data-client-direction=right]{--client-page-offset:8px;--client-text-offset:20px}
+html[data-client-direction=left]{--client-page-offset:-8px;--client-text-offset:-20px}
+html[data-client-transition=running] .jx3-brand-text small{view-transition-name:client-brand-mode}
+html[data-client-transition=running] [data-client-label]{view-transition-name:client-picker-mode}
+html[data-client-transition=running]::view-transition-group(client-brand-mode),
+html[data-client-transition=running]::view-transition-group(client-picker-mode){z-index:2}
+html[data-client-transition=running]::view-transition-old(artist-surface){animation:none;opacity:0}
+html[data-client-transition=running]::view-transition-new(artist-surface){--client-offset:var(--client-page-offset);--client-enter-opacity:.9}
+html[data-client-transition=running]::view-transition-old(client-brand-mode),
+html[data-client-transition=running]::view-transition-new(client-brand-mode),
+html[data-client-transition=running]::view-transition-old(client-picker-mode),
+html[data-client-transition=running]::view-transition-new(client-picker-mode){--client-offset:var(--client-text-offset)}
+html[data-client-transition=running]::view-transition-old(client-brand-mode),
+html[data-client-transition=running]::view-transition-old(client-picker-mode){
+ animation:client-shift-out 100ms cubic-bezier(.22,.61,.36,1) both;
+ mix-blend-mode:normal;
+}
+html[data-client-transition=running]::view-transition-new(artist-surface),
+html[data-client-transition=running]::view-transition-new(client-brand-mode),
+html[data-client-transition=running]::view-transition-new(client-picker-mode){
+ animation:client-shift-in 340ms cubic-bezier(.22,.61,.36,1) both;
+ mask-image:none;mix-blend-mode:normal;
+}
+html[data-client-transition=running]::view-transition-new(client-brand-mode),
+html[data-client-transition=running]::view-transition-new(client-picker-mode){animation-delay:85ms;animation-duration:255ms}
+@keyframes client-shift-out{from{opacity:1;transform:translateX(0)}to{opacity:0;transform:translateX(var(--client-offset))}}
+@keyframes client-shift-in{from{opacity:var(--client-enter-opacity,0);transform:translateX(calc(-1 * var(--client-offset)))}to{opacity:1;transform:translateX(0)}}

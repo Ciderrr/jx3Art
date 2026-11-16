@@ -11,14 +11,19 @@ import {Dialog} from '@animate-ui/react/primitives/radix-ui/dialog';import {Quic
 import type {Bridge,Snapshot} from './bridge';import './intermission-motion.css';import './host.css';
 const names:Record<string,string>={G1:'幕间',G2:'绛台',G3:'候场',M1:'墨场',M2:'素幕',M3:'续章',A1:'清笺',A2:'听雨',A3:'流光',F1:'夜演',F2:'朱弦',F3:'青岚'};
 const empty:Snapshot={schema:1,revision:0,epoch:0,phase:'Stopped',title:'正在连接助手',running:false,stopping:false,closing:false,ever:false,starts:0,plan:3,automatic:false,skin:'幕间',skipReminder:false,startHotkey:'F7',stopHotkey:'F8',seconds:null,reason:null,awaitingApproval:false,canStart:false,preparationToken:null,gain:'0',total:null,partial:false,health:null,error:null};
-const automaticTakeoverHint='续演时会尝试自动切回游戏并移动鼠标。Windows 可能拒绝切换，挂机时建议让游戏保持在前台。切换失败时，游戏的任务栏图标可能会闪动。';
+const automaticTakeoverHint=[
+ '续演时会尝试自动切回游戏并移动鼠标。',
+ 'Windows 有时会拒绝切换，挂机时建议让游戏保持在前台。',
+ '切换失败时，游戏的任务栏图标有时会闪动。',
+];
 function TakeoverHint({automatic,stopKey}:{automatic:boolean;stopKey?:string}){
  const Icon=automatic?BellRing:Bell;
  return <p className="jx3-hint jx3-takeover-hint" data-automatic={automatic}>
   <span className="jx3-takeover-icon" aria-hidden="true"><Icon size={15} strokeWidth={1.6}/></span>
-  <span>{automatic?automaticTakeoverHint+(stopKey?' 接管时请暂缓操作。':''):
+  <span>{automatic?<>{automaticTakeoverHint.map(line=><span className="jx3-takeover-line" key={line}>{line}</span>)}
+   {stopKey&&<span className="jx3-takeover-line">接管时请暂缓操作。</span>}</>:
    stopKey?'表演结束后提醒，允许后才切回游戏并移动鼠标。':'表演结束时提醒，允许后才接管。'}
-   {stopKey&&<>按 {stopKey} 可停止辅助。</>}
+   {stopKey&&<span className="jx3-takeover-line">按 {stopKey} 可停止辅助。</span>}
   </span>
  </p>;
 }
@@ -124,13 +129,14 @@ function ArtistView({bridge}:{bridge:Bridge}){
   const report=(error:unknown)=>setCommandError(error instanceof Error?error.message:String(error));
   if(clientReduce||!document.startViewTransition){void update().catch(report);return;}
   document.documentElement.dataset.clientTransition='running';
+  document.documentElement.dataset.clientDirection=mode==='wujie'?'right':'left';
   document.documentElement.dataset.clientCapture='true';
   const active=document.startViewTransition(async()=>{try{await update();}catch(error){active.skipTransition();report(error);}});
   clientTransition.current=active;
   const clearCapture=()=>{if(clientTransition.current===active)delete document.documentElement.dataset.clientCapture;};
   const clear=()=>{
    clearCapture();
-   if(clientTransition.current===active){delete document.documentElement.dataset.clientTransition;clientTransition.current=null;}
+   if(clientTransition.current===active){delete document.documentElement.dataset.clientTransition;delete document.documentElement.dataset.clientDirection;clientTransition.current=null;}
   };
   void active.ready.then(clearCapture,clearCapture);
   void active.finished.then(clear,clear);

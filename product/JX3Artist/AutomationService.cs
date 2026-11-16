@@ -4,7 +4,7 @@ using Jx3.OneClickTest;
 using InputNative=Jx3.OneClickTest.Native;
 namespace JX3Artist;
 
-internal sealed record ViewState(Phase Phase,string Message,int Starts=0,int Returns=0,string? Preview=null,DateTime? FrameTime=null,double? FrameAgeMs=null,string? Detail=null,double? CountdownEnd=null,string? CountdownStatus=null,double? NextCheck=null,bool AwaitingApproval=false,double? DisplayDeadline=null,double? DisplayUncertaintyMs=null,bool CountdownEstimated=false,bool GameMinimized=false,double? MinimizedDeadline=null,bool ForegroundRecovery=false,bool ForegroundRechecking=false);
+internal sealed record ViewState(Phase Phase,string Message,int Starts=0,int Returns=0,string? Preview=null,DateTime? FrameTime=null,double? FrameAgeMs=null,string? Detail=null,double? CountdownEnd=null,string? CountdownStatus=null,double? NextCheck=null,bool AwaitingApproval=false,double? DisplayDeadline=null,double? DisplayUncertaintyMs=null,bool CountdownEstimated=false,bool GameMinimized=false,double? MinimizedDeadline=null,bool ForegroundRecovery=false,bool ForegroundRechecking=false,bool ForegroundRetrying=false);
 internal sealed class AutomationService(string dataRoot,string engineRoot,bool demo=false,ExperienceSession? experience=null,string? wujieTemplates=null)
 {
     internal SupportHistory History{get;}=new(dataRoot);
@@ -48,10 +48,11 @@ internal sealed class AutomationService(string dataRoot,string engineRoot,bool d
         var core=new AutomationController(maxStarts,FrameTiming.NowMs(),retainCountdownOnNumericMiss:templates!=null);string? image=null;DateTime? frameTime=null;double? age=null,nextCheck=null;
         bool gameMinimized=false,foregroundRecovery=false;
         double? minimizedDeadline=null,foregroundRecoveryAfter=null;
+        Func<bool>? focusRetryPermit=null;
         using var journal=new Journal(Path.Combine(dataRoot,"logs"),error=>Publish(Latest with{Phase=Phase.Paused,Message="后续操作已停止，但日志关闭失败",Detail=error}),(kind,data)=>History.Record(kind,data));
         var trace=new SessionTrace(journal);
         void Push(string? detail=null)=>Publish(new(core.State,core.Message,core.Starts,core.Returns,image,frameTime,age,detail,core.Countdown.EndSourceMs,core.Countdown.Status,nextCheck,Volatile.Read(ref approvalRequested)==1,core.Countdown.DisplayDeadline,core.Countdown.DisplayUncertaintyMs,core.Countdown.Estimated,
-            !core.Done&&gameMinimized,core.Done?null:minimizedDeadline,!core.Done&&foregroundRecovery,foregroundRecoveryAfter.HasValue));
+            !core.Done&&gameMinimized,core.Done?null:minimizedDeadline,!core.Done&&foregroundRecovery,foregroundRecoveryAfter.HasValue,!core.Done&&focusRetryPermit!=null));
         try
         {
             if(demo)
@@ -62,7 +63,7 @@ internal sealed class AutomationService(string dataRoot,string engineRoot,bool d
             var self=InputPreflight.Read((uint)Environment.ProcessId);if(self.Elevated!=true)throw new InvalidOperationException("需要管理员权限。请正常双击 JX3Artist.exe 启动并由你处理系统授权。");
             using var session=new GameSession(engineRoot,Path.Combine(dataRoot,"cache"),templates);var desktop=new Desktop(session.Pid);
             trace.Begin(new{version=typeof(AutomationService).Assembly.GetName().Version?.ToString(),maxStarts,unattended,mode="temporary foreground takeover; NOT true background input",pid=session.Pid,window=session.Window.ToInt64()});
-            var takeover=new TakeoverPolicy(()=>Mode.Enabled);var retryBudget=new TakeoverRetryBudget();bool automaticGrant=false;Func<bool>? focusRetryPermit=null;var preparationForeground=new PreparationForeground();bool entryDiagnosticWritten=false;int localFailures=0;int failures=0,reanchors=0,previousDelay=0;Phase previous=core.State;string previousTimerStatus="",previousTimerReason="";double lastTimerDiagnostic=double.NegativeInfinity;
+            var takeover=new TakeoverPolicy(()=>Mode.Enabled);var retryBudget=new TakeoverRetryBudget();bool automaticGrant=false;var preparationForeground=new PreparationForeground();bool entryDiagnosticWritten=false;int localFailures=0;int failures=0,reanchors=0,previousDelay=0;Phase previous=core.State;string previousTimerStatus="",previousTimerReason="";double lastTimerDiagnostic=double.NegativeInfinity;
             void WaitForGameForeground(bool actionPending)
             {
                 if(!foregroundRecovery)
@@ -235,7 +236,7 @@ internal sealed class AutomationService(string dataRoot,string engineRoot,bool d
                                 if(result.Error==FocusTransaction.ActivationFailure)
                                 {
                                     focusRetryPermit=permitted;
-                                    core.ActionDeferred("暂未切到游戏，正在重新确认入口后重试");
+                                    core.ActionDeferred(StatusSummary.ForegroundRetryHint);
                                 }
                                 else
                                 {

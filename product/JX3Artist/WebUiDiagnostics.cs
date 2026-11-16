@@ -89,7 +89,7 @@ internal static class WebUiDiagnostics
             Assert((await Eval(host,"document.querySelector('.jx3-fallback').textContent.includes('请开启艺人身份，站在平整路面上，开始辅助吧！')")).GetBoolean(),"idle guidance missing");
             host.Diagnostic=false;try{host.Execute("ready",JsonSerializer.SerializeToElement(new{}));host.Publish();await Until(host,"!!document.querySelector('.jx3-preparation')");Assert(!host.Service.IsRunning,"startup reminder started automation");await Capture(host,Path.Combine(output,"startup-preparation.png"));
             host.Execute("setAutomatic",JsonSerializer.SerializeToElement(new{enabled=true}));host.Publish();
-            await Until(host,"['Windows 可能拒绝切换','建议让游戏保持在前台','任务栏图标可能会闪动'].every(text=>document.querySelector('.jx3-preparation .jx3-hint').textContent.includes(text))");
+            await Until(host,"['Windows 有时会拒绝切换','建议让游戏保持在前台','任务栏图标有时会闪动'].every(text=>document.querySelector('.jx3-preparation .jx3-hint').textContent.includes(text))");
             Assert((await Eval(host,"!!document.querySelector('.jx3-preparation .jx3-takeover-hint[data-automatic=true] .lucide-bell-ring')")).GetBoolean(),
                 "automatic warning bell missing");
             await Capture(host,Path.Combine(output,"startup-automatic-advice.png"));
@@ -206,7 +206,7 @@ internal static class WebUiDiagnostics
             }
         });
         await Test("real automatic mode and visible explanation agree before start",async()=>{
-            host.Execute("setAutomatic",JsonSerializer.SerializeToElement(new{enabled=true}));host.Publish();await Until(host,"window.__artistSnapshot.automatic===true");Assert(host.Service.Mode.Enabled,"UI choice not bound to real mode");Assert((await Eval(host,"['自动切回游戏','Windows 可能拒绝切换','建议让游戏保持在前台','任务栏图标可能会闪动'].every(text=>document.querySelector('aside .jx3-hint').textContent.includes(text))")).GetBoolean(),"manual hint contradicts switch");
+            host.Execute("setAutomatic",JsonSerializer.SerializeToElement(new{enabled=true}));host.Publish();await Until(host,"window.__artistSnapshot.automatic===true");Assert(host.Service.Mode.Enabled,"UI choice not bound to real mode");Assert((await Eval(host,"['自动切回游戏','Windows 有时会拒绝切换','建议让游戏保持在前台','任务栏图标有时会闪动'].every(text=>document.querySelector('aside .jx3-hint').textContent.includes(text))")).GetBoolean(),"manual hint contradicts switch");
         });
         await Test("actual settings recorder captures DOM combination and persists native keys",async()=>{
             await Eval(host,"(()=>{const b=document.querySelector('[data-target=menu]');b.focus();b.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',bubbles:true}));})()");await Until(host,"!!document.querySelector('[data-target=settings]')");await Eval(host,"document.querySelector('[data-target=settings]').click()");await Until(host,"!!document.querySelector('[aria-label=录入开始快捷键]')");await Task.Delay(350);Assert((await Eval(host,"document.activeElement===document.querySelector('.jx3-settings-title') && document.activeElement!==document.querySelector('[data-target=close]')")).GetBoolean(),"settings auto-focused close button");Assert((await Eval(host,"getComputedStyle(document.querySelector('.jx3-window-actions button')).pointerEvents==='auto' && !document.querySelector('.jx3-paper').contains(document.querySelector('.jx3-window-actions'))")).GetBoolean(),"caption controls trapped beneath modal or scaled content");await Capture(host,Path.Combine(output,"settings-first-open.png"));await host.Browser.CoreWebView2.CallDevToolsProtocolMethodAsync("Input.dispatchKeyEvent","{\"type\":\"keyDown\",\"key\":\"Tab\",\"code\":\"Tab\",\"windowsVirtualKeyCode\":9}");await Until(host,"document.activeElement===document.querySelector('[data-target=close]')");Assert((await Eval(host,"document.activeElement.matches(':focus-visible')")).GetBoolean(),"keyboard focus ring removed");
@@ -341,15 +341,14 @@ internal static class WebUiDiagnostics
         await Until(host,"!document.querySelector('[data-client=wujie]').hasAttribute('aria-disabled')");
         var reduced=(await Eval(host,"matchMedia('(prefers-reduced-motion: reduce)').matches")).GetBoolean();
         var width=await Eval(host,"document.querySelector('[aria-label=客户端模式]').getBoundingClientRect().width");
-        await Eval(host,"window.__clientMotion=[];(()=>{const start=performance.now();const tick=()=>{window.__clientMotion.push(document.getAnimations().filter(a=>a.animationName==='curtain-open').map(a=>({name:a.animationName,progress:a.effect.getComputedTiming().progress})));if(performance.now()-start<650)requestAnimationFrame(tick);};requestAnimationFrame(tick);document.querySelector('[data-client=wujie]').click();})()");
+        await Eval(host,"document.querySelector('[data-client=wujie]').click()");
         await Until(host,"window.__artistSnapshot.wujieTrial && [...document.querySelectorAll('[data-client-label]')].some(x=>x.dataset.clientLabel.includes('极速端'))");
-        if(!reduced)await Until(host,"window.__clientMotion.some(xs=>xs.some(x=>x.name==='curtain-open'&&x.progress>0&&x.progress<1))");
+        if(!reduced)await VerifyClientShift(1,"client-shift-right");
         await Until(host,"!document.documentElement.dataset.clientTransition");
         Assert((await Eval(host,"(()=>{const s=document.querySelector('.jx3-paper');return getComputedStyle(s).viewTransitionName==='artist-surface' && ['header','main','footer'].every(x=>s.querySelector(x));})()")).GetBoolean(),
             "client transition does not include header, main content and footer");
         Assert(Math.Abs(width.GetDouble()-(await Eval(host,"document.querySelector('[aria-label=客户端模式]').getBoundingClientRect().width")).GetDouble())<1,
             "client mode transition shifted the toolbar");
-        File.WriteAllText(Path.Combine(output,"client-motion-frames.json"),(await Eval(host,"window.__clientMotion")).GetRawText());
         await Capture(host,Path.Combine(output,"client-mode-selected.png"));
         await Until(host,"!document.querySelector('[data-client=wujie]')");
         Assert(UiPreferences.Load(settings).useWujie&&!host.Service.IsRunning,"Wujie selection was not saved or started a worker");
@@ -357,6 +356,8 @@ internal static class WebUiDiagnostics
         await Eval(host,"document.querySelector('[data-client=flagship]').click()");
         await Until(host,"!window.__artistSnapshot.wujieTrial && document.querySelectorAll('[data-client-label]').length===1 && document.querySelector('[data-client-label]').dataset.clientLabel.includes('旗舰端')");
         await Until(host,"!document.querySelector('[data-client=wujie]')");
+        if(!reduced)await VerifyClientShift(-1,"client-shift-left");
+        await Until(host,"!document.documentElement.dataset.clientTransition");
         Assert(!UiPreferences.Load(settings).useWujie&&!host.Service.IsRunning,"flagship selection was not saved or started a worker");
 
         host.Execute("requestStart",JsonSerializer.SerializeToElement(new{}));
@@ -389,7 +390,7 @@ internal static class WebUiDiagnostics
         await OpenClientMenu();
         await Eval(host,"document.querySelector('[data-client=flagship]').click()");
         await Until(host,"!window.__artistSnapshot.wujieTrial && document.querySelector('[data-client-label]').dataset.clientLabel.includes('旗舰端')");
-        Assert((await Eval(host,"!document.documentElement.dataset.clientTransition && !document.getAnimations().some(a=>a.animationName==='curtain-open')")).GetBoolean(),
+        Assert((await Eval(host,"!document.documentElement.dataset.clientTransition && !document.getAnimations().some(a=>a.animationName?.startsWith('client-shift-'))")).GetBoolean(),
             "reduced motion still animates the client surface");
         double future=FrameTiming.NowMs()+45000;
         host.FixtureRunning=true;
@@ -405,9 +406,12 @@ internal static class WebUiDiagnostics
         await Capture(host,Path.Combine(output,"minimized-estimate.png"));
         host.Fixture=host.Fixture with{MinimizedDeadline=FrameTiming.NowMs()-1};host.Publish();
         await Until(host,"window.__artistSnapshot.seconds===null && document.querySelector('.jx3-window-wait').textContent.includes('预计到时') && document.querySelector('.jx3-time').textContent.trim()===''");
+        host.Fixture=new(Phase.ConfirmingEntry,"隔离重试",ForegroundRetrying:true);
+        host.Publish();
+        await Until(host,"window.__artistSnapshot.title==='正在重试切回游戏' && document.querySelector('.jx3-window-wait').textContent.includes('正在重新确认入口后重试')");
         host.Fixture=new(Phase.WaitingVisibility,"隔离等待",ForegroundRecovery:true);
         host.Publish();
-        await Until(host,"window.__artistSnapshot.waitingHint==='foreground' && document.querySelector('.jx3-window-wait').textContent.includes('本轮计划已保留')");
+        await Until(host,"window.__artistSnapshot.waitingHint==='foreground' && document.querySelector('.jx3-window-wait').textContent.includes('Windows已多次拒绝切回游戏，请手动切回，助手将继续')");
         await Capture(host,Path.Combine(output,"waiting-game-foreground.png"));
         host.Fixture=host.Fixture with{AwaitingApproval=true};host.Publish();
         await Until(host,"window.__artistSnapshot.awaitingApproval && document.querySelector('.jx3-window-wait').textContent.includes('请允许本次接管，再切回游戏')");
@@ -420,5 +424,20 @@ internal static class WebUiDiagnostics
         Assert(!host.Service.IsRunning,"tray settings started the worker");
         File.WriteAllText(Path.Combine(output,"client-menu-result.json"),JsonSerializer.Serialize(new{passed=true,scope="isolated WebView2 with demo worker only",actionsDispatched=0}));
         return 0;
+
+        async Task VerifyClientShift(int direction,string name)
+        {
+            await Until(host,"document.getAnimations().filter(a=>a.animationName==='client-shift-in').length===3");
+            var offsets=await Eval(host,"document.getAnimations().filter(a=>a.animationName==='client-shift-in').map(a=>new DOMMatrix(a.effect.getKeyframes()[0].transform).m41).sort((a,b)=>Math.abs(a)-Math.abs(b))");
+            var actual=offsets.EnumerateArray().Select(x=>x.GetDouble()).ToArray();
+            Assert(actual.SequenceEqual(new double[]{-8*direction,-20*direction,-20*direction}),
+                "page and labels do not enter in the same direction");
+            File.WriteAllText(Path.Combine(output,name+".json"),offsets.GetRawText());
+            await Eval(host,"window.__shiftFrames=document.getAnimations().filter(a=>a.animationName?.startsWith('client-shift-'));window.__shiftFrames.forEach(a=>{a.pause();a.currentTime=115});window.__shiftPainted=false;requestAnimationFrame(()=>requestAnimationFrame(()=>window.__shiftPainted=true))");
+            await Until(host,"window.__shiftPainted===true");
+            using(var stream=File.Create(Path.Combine(output,name+".png")))
+                await host.Browser.CoreWebView2.CapturePreviewAsync(CoreWebView2CapturePreviewImageFormat.Png,stream);
+            await Eval(host,"window.__shiftFrames.forEach(a=>a.finish())");
+        }
     }
 }
